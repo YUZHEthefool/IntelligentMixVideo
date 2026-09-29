@@ -6,6 +6,7 @@ they require the pinned Chromium binary and bubblewrap sandbox.
 
 import asyncio
 import os
+from pathlib import Path
 
 import pytest
 
@@ -16,6 +17,8 @@ from server.remotion_templates.tools.contracts import ComponentDefinition, Rende
 
 
 pytestmark = pytest.mark.skipif(os.environ.get("IMV_TEST_RENDERER") != "1", reason="set IMV_TEST_RENDERER=1 for Linux sandbox integration")
+# Capture the explicit browser before the common fixture clears IMV_* variables.
+BROWSER_EXECUTABLE = os.environ.get("IMV_BROWSER_EXECUTABLE")
 
 
 CODE = """
@@ -47,6 +50,8 @@ def component():
 def validator(tmp_path):
     """Construct a Linux renderer validator using only server-owned settings."""
     settings = Settings(_env_file=None, data_dir=tmp_path)
+    if BROWSER_EXECUTABLE:
+        settings.browser_executable = Path(BROWSER_EXECUTABLE)
     return ToolValidator(Renderer(settings), tmp_path / "validation")
 
 
