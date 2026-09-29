@@ -38,6 +38,8 @@ class Settings(ClientSettings, CommonSettings):
     vision_api_key: SecretStr | None = None
     data_dir: Path = Path(".data")
     tool_asset_base_url: str = "http://127.0.0.1:20070/api/templates/tool-assets"
+    # Temporary create → compose → save workflow; the host builds and mounts the preview.
+    creation_only: bool = True
     job_timeout_seconds: int = Field(default=600, ge=1, le=3600)
     render_timeout_seconds: int = Field(default=180, ge=1, le=600)
     # Keep usage accounting while temporarily disabling cumulative model quota enforcement.

@@ -13,6 +13,7 @@
 - PR76 工具契约维护在 `docs/remotion-agent-tool-contracts.md`；图片 info/resize/crop（不含超分辨率）及 Preset/Sprite/validate 的装饰器注册位于 `server/src/server/remotion_templates/tools/`，工具实现遵循该文档第 1081 行的端到端调用顺序；旧 PR74 独立接口保持原语义。
 - Remotion 配置类与加载函数位于 `remotion_templates/settings.py`，通过 `server.remotion_templates.settings` 导入；继续复用 `config_base.CommonSettings` 读取 `server/.env`，相对数据目录和默认 `server/remotion/` 渲染资源位置保持不变。
 - Remotion 新生成采用 Outer → Plan → Executor → Plan → Outer 三层 ReAct，三层有独立有界窗口，只有 Outer 请求最终交付。Plan 负责顺序计划与执行批次，Executor 仅使用当前步骤工具；权限由宿主校验，不能递归唤醒 Plan。普通问答不经过额外评审模型。
+- 当前默认 IMV_CREATION_ONLY=true，临时仅向 Agent 开放 preset.create、sprite.compose、sprite.create、tools.inspect 和计划控制；创建 Preset 不调用语义索引，其他业务工具保留实现但不参与模型任务。最终由宿主自动执行预览所需的代码/参数检查、基础挂载与隔离构建，不要求模型编写测试或获取校验回执；只证明产物可加载，不宣称需求断言通过。恢复完整模式前须补建期间创建的 Preset 索引。
 - PR76 的 11 个业务工具由装饰器注册并校验完整输入与输出；没有旧 find、JEV、combine 或 render_code 别名。Preset 使用 ChromaDB 语义检索，创建保存新记录，修改返回独立副本。工具搜索不是模型角色，不保留 Actor/Judge/搜索模型循环。
 - 主画布固定 1080×1920、30 FPS；Sprite 时长由实例最晚结束帧决定。Preset 支持一般 Remotion 内容，组合保留实例局部画布、局部帧、独立参数和顺序层级。参数递归合并对象，数组、标量和 null 整体替换；Schema 与默认值由真实工具校验，不从旧 text_layers 推导。
 - validate.render 在 Linux 隔离浏览器中执行基础运行检查和 Agent 提供的 TypeScript 断言，不截图、不抽帧、不调用视觉 Judge；测试逐份重置，失败断言即使被脚本捕获也不得变为通过，无断言与越界帧明确报错。实际测试结论仅覆盖已执行项目。

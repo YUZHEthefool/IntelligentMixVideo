@@ -78,6 +78,18 @@ def call(identifier, name, arguments):
     )
 
 
+def test_creation_only_hides_search_and_validation_and_allows_completion(monkeypatch, tmp_path):
+    """Creation mode reaches host publication without model-owned validation receipts."""
+    monkeypatch.setattr("server.remotion_templates.agent.ToolSession", FakeSession)
+    monkeypatch.setattr(FakeSession, "validation_for", lambda *_: None)
+    harness = FakeHarness([AssistantMessage(content='{"action":"complete","sprite_id":"sprite-1"}')])
+    harness.settings.creation_only = True
+    run = AgentRun(harness, None, Budget(), tmp_path, [], lambda *_: None)
+    names = {tool.name for tool in run._tools_for_layer()}
+    assert names == {"preset.create", "sprite.compose", "sprite.create", "tools.inspect", "tools.plan_execute"}
+    assert asyncio.run(run.plan_execute()) == {"published": "sprite-1"}
+
+
 def test_outer_plan_executor_plan_outer_handoff(monkeypatch, tmp_path):
     """A planned task must traverse every layer and publish only after Outer completion."""
     monkeypatch.setattr("server.remotion_templates.agent.ToolSession", FakeSession)

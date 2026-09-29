@@ -33,6 +33,16 @@
 
 ## 工具与完成条件
 
+当前默认 `IMV_CREATION_ONLY=true`，临时只向 Agent 提供 `preset.create`、
+`sprite.compose`、`sprite.create`、`tools.inspect` 和计划控制。
+实际流程为 **创建 Preset → 组合 → 保存 Sprite → Outer 请求完成 → 宿主生成预览**。
+创建 Preset 仅保存本地记录，不调用 ChromaDB 或下载嵌入模型；搜索、修改、图片工具和
+Agent 显式校验暂不开放。宿主保留代码/参数合法性、隔离编译和基础挂载检查，
+自动生成无自定义脚本的真实回执后构建、封存预览，不声称验证了用户需求或视觉效果。
+
+以下是保留的完整工具目录和 `IMV_CREATION_ONLY=false` 时的流程；重新启用语义搜索前，
+需为精简模式下新建的 Preset 补建索引（当前不自动补建）。
+
 | 模块 | 工具 |
 | --- | --- |
 | 图片 | `image.info`、`image.resize`、`image.crop`（不含超分） |
@@ -106,6 +116,7 @@ IMV_TOOL_ASSET_BASE_URL=http://127.0.0.1:20070/api/templates/tool-assets
 | `IMV_MAX_PLAN_CALLS / TOKENS` | 12 / 80000 | Plan 分类额度 |
 | `IMV_MAX_EXECUTOR_CALLS / TOKENS` | 24 / 160000 | Executor 分类额度 |
 | `IMV_MAX_STEPS / IMV_MAX_TOOLUSE` | 8 / 10 | 执行批次、每批工具上限，始终生效 |
+| `IMV_CREATION_ONLY` | true | 暂时只开放创建、组合、保存；宿主自动构建预览 |
 | `IMV_ENFORCE_NO_PROGRESS` | false | 暂时关闭无进展终止，仍记录计数；设为 true 恢复 |
 | `IMV_MAX_NO_PROGRESS_TURNS` | 4 | 开启无进展保护时使用的停止阈值 |
 | `IMV_MODEL_TIMEOUT_SECONDS` | 240 | HTTP 读写空闲超时 |

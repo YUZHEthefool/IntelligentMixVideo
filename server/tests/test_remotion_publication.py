@@ -55,7 +55,7 @@ def harness(tmp_path):
     """No secrets or external model clients are loaded by this fixture."""
     font = tmp_path / "font.ttc"
     font.write_bytes(b"fixture-font")
-    settings = Settings(_env_file=None, data_dir=tmp_path / "state", font_regular=font, font_bold=font)
+    settings = Settings(_env_file=None, data_dir=tmp_path / "state", font_regular=font, font_bold=font, creation_only=False)
     return Harness(SimpleNamespace(settings=settings), OfflinePresentationRenderer(settings))
 
 
@@ -135,3 +135,22 @@ def test_cancellation_wins_over_ready_artifacts(harness, sprite):
     with pytest.raises(Conflict):
         store.publish(job.id, *result)
     assert store.project(work.id).current_version_id is None
+
+
+def test_creation_only_builds_preview_without_agent_test_scripts(harness, sprite, tmp_path):
+    """The host checks mounting and builds sealed artifacts after a model only saves a Sprite."""
+    harness.settings.creation_only = True
+    session = session_for(sprite, None)
+    seen = []
+
+    async def validate(request):
+        """Record the host's exact component and confirm no custom scripts are requested."""
+        seen.append(request)
+        return runtime_report(sprite)
+
+    session.validate_pr76_render = validate
+    candidate, spec, report, directory = asyncio.run(harness.finalize_sprite(session, "saved", Budget(), tmp_path / "created"))
+    assert len(seen) == 1 and seen[0].tests == []
+    assert seen[0].component.code == sprite.code
+    assert seen[0].component.default_parameters == sprite.default_parameters
+    assert report.passed and (directory / "interactive.js").exists()
