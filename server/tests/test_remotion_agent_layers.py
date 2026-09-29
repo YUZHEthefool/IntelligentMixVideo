@@ -5,10 +5,12 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 from server.remotion_templates.agent import AgentRun
 from server.remotion_templates.context import AssistantMessage
 from server.remotion_templates.planning import Plan
-from server.remotion_templates.provider import Budget
+from server.remotion_templates.provider import Budget, ExecutionFailure
 
 
 class FakeSession:
@@ -49,6 +51,7 @@ class FakeHarness:
         self.settings = SimpleNamespace(
             max_steps=4,
             max_tooluse=3,
+            enforce_no_progress=False,
             max_no_progress_turns=4,
         )
 
@@ -134,3 +137,42 @@ def test_executor_cannot_call_plan_control(monkeypatch, tmp_path):
     result = asyncio.run(run.plan_execute())
     assert result.questions == ["需要更多输入"]
     assert run.state.index == 0
+
+
+@pytest.mark.parametrize("enforce_no_progress", [False, True])
+def test_empty_searches_can_delegate_with_progress_guard_disabled(
+    monkeypatch, tmp_path, enforce_no_progress
+):
+    """四次空检索后委派：关闭保护能进入 Plan，开启时仍按原阈值停止。"""
+    monkeypatch.setattr("server.remotion_templates.agent.ToolSession", FakeSession)
+
+    async def empty_search(self, name, args, catalog):
+        """复现实际日志中的空检索回执，不调用模型或 ChromaDB。"""
+        assert name == "preset.search"
+        return {"matches": []}
+
+    monkeypatch.setattr(FakeSession, "execute", empty_search)
+    searches = [
+        call(f"search-{index}", "preset_search", {"query": f"title {index}"})
+        for index in range(4)
+    ]
+    harness = FakeHarness([
+        AssistantMessage(tool_calls=searches[0].tool_calls + searches[1].tool_calls),
+        AssistantMessage(tool_calls=searches[2].tool_calls + searches[3].tool_calls),
+        call("delegate", "tools_plan_execute", {"action": "delegate", "reason": "create title"}),
+        AssistantMessage(content=json.dumps({
+            "status": "needs_input", "summary": "choose font", "questions": ["选择字体？"]
+        })),
+        AssistantMessage(content=json.dumps({"questions": ["选择字体？"]})),
+    ])
+    harness.settings.enforce_no_progress = enforce_no_progress
+    run = AgentRun(harness, None, Budget(), tmp_path, [], lambda *_: None)
+    if enforce_no_progress:
+        with pytest.raises(ExecutionFailure) as failure:
+            asyncio.run(run.plan_execute())
+        assert failure.value.code == "no_progress"
+        assert harness.roles == ["outer", "outer", "outer"]
+    else:
+        result = asyncio.run(run.plan_execute())
+        assert result.questions == ["选择字体？"]
+        assert harness.roles == ["outer", "outer", "outer", "plan", "outer"]

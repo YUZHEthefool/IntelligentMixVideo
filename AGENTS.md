@@ -18,7 +18,7 @@
 - validate.render 在 Linux 隔离浏览器中执行基础运行检查和 Agent 提供的 TypeScript 断言，不截图、不抽帧、不调用视觉 Judge；测试逐份重置，失败断言即使被脚本捕获也不得变为通过，无断言与越界帧明确报错。实际测试结论仅覆盖已执行项目。
 - 最终交付引用本任务已保存 Sprite，代码、Schema、参数与时长必须匹配最新通过回执。宿主隔离构建 Export.tsx 与 Player，按 SHA-256 封存产物，发布事务再次检查取消。工具保存不等于聊天版本发布。新版本 schema_version=2；旧版本读取及 PR74 独立发布/绑定接口保留，不自动迁移新 Sprite 到旧 Protobuf。
 - 新版手动参数保存支持嵌套 JSON，不调用模型；保留源码，经参数合法性、基础运行与预览构建后保存 user_parameters 版本。用户净变化仍相对最近 Agent 基线计算，后续模型读取当前成功参数；失败、问答与澄清不清除调整。
-- Provider 的角色仅 outer/plan/executor；IMV_ACTOR_* 只是保留的共用模型配置键。SSE 完整结束后才执行工具。IMV_ENFORCE_MODEL_BUDGET 默认 false，单次输出、超时、取消、无进展、执行批次与工具上限始终生效。私有审计与公开聊天分离，不公开工具参数或内部诊断。
+- Provider 的角色仅 outer/plan/executor；IMV_ACTOR_* 只是保留的共用模型配置键。SSE 完整结束后才执行工具。IMV_ENFORCE_MODEL_BUDGET 默认 false；IMV_ENFORCE_NO_PROGRESS 默认 false，暂时关闭无进展终止但仍记录计数，设为 true 才按 IMV_MAX_NO_PROGRESS_TURNS 恢复检查。单次输出、超时、取消、执行批次与工具上限始终生效。私有审计与公开聊天分离，不公开工具参数或内部诊断。
 - 真实浏览器执行保留 Linux bubblewrap/prlimit，不提供本次 macOS Colima/Docker 适配；Linux 验证由用户执行。离线回归与前端构建不能宣称实际 Linux 渲染通过。配置与命令维护在 remotion_templates/README.md 和 server/.env.example，不修改用户真实 .env。
 - `server/src/server/asr/` 提供独立的 `transcribe` 函数与 `python -m server.asr` 命令行入口，尚未注册 HTTP 路由；通过北京地域 Fun-ASR 接收 HTTPS 音频直链并返回原始转写 JSON。字段声明位于 `asr/settings.py`，公开转写函数通过包入口按需导入；设置发现不加载业务，`DASHSCOPE_API_KEY` 在 `asr/asr.py` 业务模块加载时读取一次，固定读取源码 `server/.env`，不存在时不回退工作目录，进程环境变量优先；测试隔离文件、密钥、HTTP 和轮询等待。
 - 视频合成新任务在 IMS 渲染后将临时源地址的内容转存至 ZOS `imv/video_composition/{task_id}.mp4`，并通过服务端 FFmpeg 从同一成片按解码顺序截取第 3 帧，上传同名 `.png`；只给这两个对象设置 `public-read`，核对大小和匿名读取后才保存成功。图片 URL 可按 `ZOS_WEB_URL` 和对象 key 拼出，不进入 GET 或回调；两者仍只返回视频的持久化地址。旧成功任务不迁移或补图。ZOS 凭据只读服务端环境，不进入客户端配置头或任务快照；转存失败不能返回 IMS 临时直链作为成功结果。

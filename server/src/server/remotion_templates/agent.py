@@ -408,7 +408,10 @@ class AgentRun:
             self.turn += 1
             if getattr(self.harness.settings, "enforce_model_budget", False) and self.turn > 50:
                 raise ModelFailure("Agent turn budget exhausted without verified completion.")
-            if self.stalled_turns >= self.harness.settings.max_no_progress_turns:
+            if (
+                self.harness.settings.enforce_no_progress
+                and self.stalled_turns >= self.harness.settings.max_no_progress_turns
+            ):
                 raise ExecutionFailure("no_progress", "Agent produced no new action evidence after bounded steering")
             snapshot, images = self.snapshot()
             role = self.layer.value

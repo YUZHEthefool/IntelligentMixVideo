@@ -100,7 +100,8 @@ IMV_TOOL_ASSET_BASE_URL=http://127.0.0.1:20070/api/templates/tool-assets
 | `IMV_MAX_PLAN_CALLS / TOKENS` | 12 / 80000 | Plan 分类额度 |
 | `IMV_MAX_EXECUTOR_CALLS / TOKENS` | 24 / 160000 | Executor 分类额度 |
 | `IMV_MAX_STEPS / IMV_MAX_TOOLUSE` | 8 / 10 | 执行批次、每批工具上限，始终生效 |
-| `IMV_MAX_NO_PROGRESS_TURNS` | 4 | 连续无有效新观察保护 |
+| `IMV_ENFORCE_NO_PROGRESS` | false | 暂时关闭无进展终止，仍记录计数；设为 true 恢复 |
+| `IMV_MAX_NO_PROGRESS_TURNS` | 4 | 开启无进展保护时使用的停止阈值 |
 | `IMV_MODEL_TIMEOUT_SECONDS` | 240 | HTTP 读写空闲超时 |
 | `IMV_JOB_TIMEOUT_SECONDS` | 600 | 全任务执行超时，不含排队 |
 | `IMV_RENDER_TIMEOUT_SECONDS` | 180 | 隔离进程超时 |
