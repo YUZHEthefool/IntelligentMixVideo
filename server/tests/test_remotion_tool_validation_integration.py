@@ -13,6 +13,7 @@ import pytest
 from server.remotion_templates.renderer import Renderer
 from server.remotion_templates.settings import Settings
 from server.remotion_templates.tool_validation import ToolValidator
+from server.remotion_templates.tools.registry import get_tool
 from server.remotion_templates.tools.contracts import ComponentDefinition, RenderValidationInput, TestScript
 
 
@@ -109,3 +110,17 @@ export default async function run(ctx) { await ctx.set_frame(ctx.composition.dur
     report = asyncio.run(validator(tmp_path).validate_render(RenderValidationInput(component=component(), duration_frames=150, tests=tests)))
     assert report.passed is False
     assert [item.status for item in report.tests] == ["failed", "error", "error"]
+
+
+def test_inspected_render_example_executes_real_assertions(tmp_path):
+    """The example available to the model must exercise the actual TestContext API."""
+    from server.remotion_templates.tools import catalog  # Register the public tools.
+
+    tool = get_tool("validate.render")
+    assert "ctx.assert_equal" in tool.wire()["function"]["description"]
+    request = RenderValidationInput.model_validate(tool.describe()["examples"][0]["input"])
+    assert request.tests, "Inspection must include an executable behavior-test example"
+    report = asyncio.run(validator(tmp_path).validate_render(request))
+    assert report.passed, report.model_dump()
+    assert report.custom_tests_executed == len(request.tests)
+    assert all(test.assertions for test in report.tests)

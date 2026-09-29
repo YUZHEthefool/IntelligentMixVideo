@@ -17,6 +17,7 @@
 - 主画布固定 1080×1920、30 FPS；Sprite 时长由实例最晚结束帧决定。Preset 支持一般 Remotion 内容，组合保留实例局部画布、局部帧、独立参数和顺序层级。参数递归合并对象，数组、标量和 null 整体替换；Schema 与默认值由真实工具校验，不从旧 text_layers 推导。
 - validate.render 在 Linux 隔离浏览器中执行基础运行检查和 Agent 提供的 TypeScript 断言，不截图、不抽帧、不调用视觉 Judge；测试逐份重置，失败断言即使被脚本捕获也不得变为通过，无断言与越界帧明确报错。实际测试结论仅覆盖已执行项目。
 - validate.render 的 worker 在启动浏览器前创建本次校验的 `.tmp`；运行环境错误通过 VALIDATION_UNAVAILABLE 保留原始诊断，不被缺失检查项的“报告不完整”覆盖。
+- validate.render 的模型工具描述必须包含真实 TestContext API 与元素快照结构，inspect 提供可运行断言示例；示例由真实 Linux 浏览器集成测试验证，不让模型猜测断言接口。
 - 最终交付引用本任务已保存 Sprite，代码、Schema、参数与时长必须匹配最新通过回执。宿主隔离构建 Export.tsx 与 Player，按 SHA-256 封存产物，发布事务再次检查取消。工具保存不等于聊天版本发布。新版本 schema_version=2；旧版本读取及 PR74 独立发布/绑定接口保留，不自动迁移新 Sprite 到旧 Protobuf。
 - 新版手动参数保存支持嵌套 JSON，不调用模型；保留源码，经参数合法性、基础运行与预览构建后保存 user_parameters 版本。用户净变化仍相对最近 Agent 基线计算，后续模型读取当前成功参数；失败、问答与澄清不清除调整。
 - Provider 的角色仅 outer/plan/executor；IMV_ACTOR_* 只是保留的共用模型配置键。SSE 完整结束后才执行工具。IMV_ENFORCE_MODEL_BUDGET 默认 false；IMV_ENFORCE_NO_PROGRESS 默认 false，暂时关闭无进展终止但仍记录计数，设为 true 才按 IMV_MAX_NO_PROGRESS_TURNS 恢复检查。单次输出、超时、取消、执行批次与工具上限始终生效。私有审计与公开聊天分离，不公开工具参数或内部诊断。

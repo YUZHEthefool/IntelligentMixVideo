@@ -55,6 +55,10 @@ Preset 修改返回副本，不覆盖原记录。组合保留独立实例参数�
 没有断言的脚本报错；即使脚本捕获断言异常，失败记录仍保留。每份脚本从第 0 帧和输入参数
 重新开始。最后可访问帧为 `duration_frames - 1`，不静默截断越界帧。
 工具不截图、不抽帧、不做视觉评审；没有提供的测试不声称已经覆盖。
+工具描述直接提供 `TestContext` 方法签名、元素快照结构及帧范围；
+`tools.inspect("validate.render")` 提供实际可运行的文字与参数断言示例。
+测试使用 `export default async function run(ctx)`，通过 `ctx.query` 读取页面，
+通过 `ctx.assert/assert_equal/assert_close` 记录断言；不导入 Vitest，不使用 `ctx.props/check`。
 隔离 worker 在启动浏览器前创建本次校验的 `.tmp` 目录；运行环境错误保留原始诊断，
 以 `VALIDATION_UNAVAILABLE` 返回，不视为组件断言失败，也不以“报告不完整”覆盖原因。
 

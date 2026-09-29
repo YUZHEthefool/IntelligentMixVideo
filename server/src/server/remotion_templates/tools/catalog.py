@@ -158,10 +158,44 @@ async def validate_code(owner, request: CodeValidationInput) -> ToolResult[CodeV
     constraints=["The supplied duration is measured in frames at 30 FPS."],
     side_effects=["isolated code and render validation"],
     error_codes=["INVALID_ARGUMENT", "VALIDATION_UNAVAILABLE"],
-    examples=[{"input": {"component": {"code": "export default function Label(){return null}", "parameter_schema": {"type": "object", "properties": {}, "additionalProperties": False}, "default_parameters": {}}, "duration_frames": 1}, "output": {"ok": False, "error": {"code": "VALIDATION_UNAVAILABLE", "message": "example"}}}],
+    examples=[{
+        "input": {
+            "component": {
+                "code": 'import React from "react"; export default function Label(props: {text: string}) { return <div data-testid="label">{props.text}</div>; }',
+                "parameter_schema": {"type": "object", "properties": {"text": {"type": "string"}}, "required": ["text"], "additionalProperties": False},
+                "default_parameters": {"text": "Hello"},
+            },
+            "duration_frames": 30,
+            "tests": [{"name": "visible_text_and_parameters", "code": '''export default async function run(ctx) {
+  await ctx.set_frame(29);
+  const label = await ctx.query('[data-testid="label"]');
+  ctx.assert(label !== null, 'label exists');
+  ctx.assert_equal(label.text, 'Hello', 'visible text');
+  ctx.assert(label.box.width > 0, 'visible width');
+  await ctx.set_parameters({text: 'Changed'});
+  const changed = await ctx.query('[data-testid="label"]');
+  ctx.assert_equal(changed.text, 'Changed', 'parameter update');
+}'''}],
+        },
+        "output": {"ok": False, "error": {"code": "VALIDATION_UNAVAILABLE", "message": "example of unavailable browser environment"}},
+    }],
 )
 async def validate_render(owner, request: RenderValidationInput) -> ToolResult[RenderValidationReport]:
-    """Run bounded render and optional test-script checks for one component."""
+    """Render a component and run named TypeScript behavior tests in an isolated browser.
+
+    Each test must export default async function run(ctx), with no imports or globals.
+    Await ctx.set_frame(frame), ctx.set_parameters(partial_patch), ctx.query(css_selector)
+    or ctx.query_all(css_selector). query returns null or {text, box:{x,y,width,height},
+    styles:{CSS-property-name:string}}; query_all returns an array. Coordinates are
+    canvas-relative pixels; use styles['font-weight'], styles.color, etc.
+    Record checks with ctx.assert(condition, message), ctx.assert_equal(actual, expected,
+    message), or ctx.assert_close(actual, expected, tolerance, message). Returning an
+    assertion array does not record checks. ctx has no props, check, getFrame or DOM APIs.
+    ctx.composition contains width, height, fps, duration_frames; frames are zero-based.
+    Tests reset independently to frame 0 and configured parameters. At least one real
+    assertion is required per test. Query rendered elements to verify visible behavior.
+    Use tools.inspect('validate.render') for a runnable example.
+    """
     try:
         return _success(await owner.validate_pr76_render(request))
     except Exception as exc:
