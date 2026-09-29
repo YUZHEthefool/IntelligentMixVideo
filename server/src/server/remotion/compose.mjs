@@ -36,16 +36,40 @@ const result = await build({
     },
   }],
 });
-let code = result.outputFiles[0]?.text ?? "";
-// esbuild intentionally emits JavaScript.  Re-add explicit ``any`` annotations
-// at generated function boundaries so the saved TSX remains strict-checkable;
-// the original Preset source was checked independently before composition.
-code = code.replace(/function ([A-Za-z_$][\w$]*)\(([^)]*)\) \{/g, (match, name, args) => {
-  if (!args.trim() || args.includes(":")) return match;
-  const typed = args.split(",").map((arg) => `${arg.trim()}: any`).join(", ");
-  return `function ${name}(${typed}) {`;
-});
-code = code.replace(/\(([_$A-Za-z][\w$]*)\) =>/g, "($1: any) =>");
-code = code.replace(/var __merge = \(base: any, patch: any\) =>/g, "var __merge = (base: Record<string, any>, patch: Record<string, any>) =>");
-code = code.replace(/function Sprite\(inputProps: any = \{\}\)/g, "function Sprite(inputProps: Record<string, any> = {})");
+const source = ts.createSourceFile("Sprite.tsx", result.outputFiles[0]?.text ?? "", ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+// esbuild erases types and rewrites the default export. Restore generated function
+// boundaries with the parser so defaults, destructuring and recursive helpers remain valid.
+// Original Preset modules are independently typechecked before the generated adapter.
+const transformed = ts.transform(source, [(context) => {
+  /** Normalize emitted JavaScript without running any Preset code. */
+  function visit(node) {
+    node = ts.visitEachChild(node, visit, context);
+    const any = () => ts.factory.createKeywordTypeNode(ts.SyntaxKind.AnyKeyword);
+    if (ts.isParameter(node)) {
+      return ts.factory.updateParameterDeclaration(node, node.modifiers, node.dotDotDotToken, node.name, node.questionToken,
+        node.dotDotDotToken ? ts.factory.createArrayTypeNode(any()) : any(), node.initializer);
+    }
+    if (ts.isFunctionDeclaration(node)) {
+      return ts.factory.updateFunctionDeclaration(node, node.modifiers, node.asteriskToken, node.name, node.typeParameters, node.parameters, any(), node.body);
+    }
+    if (ts.isFunctionExpression(node)) {
+      return ts.factory.updateFunctionExpression(node, node.modifiers, node.asteriskToken, node.name, node.typeParameters, node.parameters, any(), node.body);
+    }
+    if (ts.isArrowFunction(node)) {
+      return ts.factory.updateArrowFunction(node, node.modifiers, node.typeParameters, node.parameters, any(), node.equalsGreaterThanToken, node.body);
+    }
+    if (ts.isExportDeclaration(node) && !node.moduleSpecifier && node.exportClause && ts.isNamedExports(node.exportClause)) {
+      const defaultExport = node.exportClause.elements.find((item) => item.name.text === "default");
+      if (defaultExport) {
+        const remaining = node.exportClause.elements.filter((item) => item !== defaultExport);
+        const assignment = ts.factory.createExportAssignment(undefined, false, defaultExport.propertyName ?? defaultExport.name);
+        return remaining.length ? [ts.factory.updateExportDeclaration(node, node.modifiers, node.isTypeOnly, ts.factory.updateNamedExports(node.exportClause, remaining), undefined, node.attributes), assignment] : assignment;
+      }
+    }
+    return node;
+  }
+  return (root) => ts.visitNode(root, visit);
+}]);
+const code = ts.createPrinter().printFile(transformed.transformed[0]);
+transformed.dispose();
 process.stdout.write(JSON.stringify({ code }));

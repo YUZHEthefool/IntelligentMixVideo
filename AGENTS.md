@@ -16,6 +16,7 @@
 - 当前默认 IMV_CREATION_ONLY=true，临时仅向 Agent 开放 preset.create、sprite.compose、sprite.create、tools.inspect 和计划控制；创建 Preset 不调用语义索引，其他业务工具保留实现但不参与模型任务。最终由宿主自动执行预览所需的代码/参数检查、基础挂载与隔离构建，不要求模型编写测试或获取校验回执；只证明产物可加载，不宣称需求断言通过。恢复完整模式前须补建期间创建的 Preset 索引。
 - PR76 的 11 个业务工具由装饰器注册并校验完整输入与输出；没有旧 find、JEV、combine 或 render_code 别名。Preset 使用 ChromaDB 语义检索，创建保存新记录，修改返回独立副本。工具搜索不是模型角色，不保留 Actor/Judge/搜索模型循环。
 - 主画布固定 1080×1920、30 FPS；Sprite 时长由实例最晚结束帧决定。Preset 支持一般 Remotion 内容，组合保留实例局部画布、局部帧、独立参数和顺序层级。参数递归合并对象，数组、标量和 null 整体替换；Schema 与默认值由真实工具校验，不从旧 text_layers 推导。
+- Sprite 组合源码经 TypeScript AST 恢复打包擦除的函数边界类型与标准默认导出，保留解构和默认参数；不得通过正则给 `inputProps = {}` 尾部追加类型。真实集成测试覆盖 create → compose → save → 宿主预览构建。
 - validate.render 在 Linux 隔离浏览器中执行基础运行检查和 Agent 提供的 TypeScript 断言，不截图、不抽帧、不调用视觉 Judge；测试逐份重置，失败断言即使被脚本捕获也不得变为通过，无断言与越界帧明确报错。实际测试结论仅覆盖已执行项目。
 - validate.render 的 worker 在启动浏览器前创建本次校验的 `.tmp`；运行环境错误通过 VALIDATION_UNAVAILABLE 保留原始诊断，不被缺失检查项的“报告不完整”覆盖。
 - validate.render 的模型工具描述必须包含真实 TestContext API 与元素快照结构，inspect 提供可运行断言示例；示例由真实 Linux 浏览器集成测试验证，不让模型猜测断言接口。

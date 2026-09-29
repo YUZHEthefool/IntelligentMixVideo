@@ -18,8 +18,12 @@ from server.remotion_templates.tools.contracts import ComponentDefinition, Rende
 
 
 pytestmark = pytest.mark.skipif(os.environ.get("IMV_TEST_RENDERER") != "1", reason="set IMV_TEST_RENDERER=1 for Linux sandbox integration")
-# Capture the explicit browser before the common fixture clears IMV_* variables.
-BROWSER_EXECUTABLE = os.environ.get("IMV_BROWSER_EXECUTABLE")
+# Capture explicit renderer paths before the common fixture clears IMV_* variables.
+RENDERER_PATHS = {
+    field: Path(value)
+    for field in ("browser_executable", "font_regular", "font_bold")
+    if (value := os.environ.get("IMV_" + field.upper()))
+}
 
 
 CODE = """
@@ -50,9 +54,7 @@ def component():
 
 def validator(tmp_path):
     """Construct a Linux renderer validator using only server-owned settings."""
-    settings = Settings(_env_file=None, data_dir=tmp_path)
-    if BROWSER_EXECUTABLE:
-        settings.browser_executable = Path(BROWSER_EXECUTABLE)
+    settings = Settings(_env_file=None, data_dir=tmp_path, **RENDERER_PATHS)
     return ToolValidator(Renderer(settings), tmp_path / "validation")
 
 
@@ -124,3 +126,35 @@ def test_inspected_render_example_executes_real_assertions(tmp_path):
     assert report.passed, report.model_dump()
     assert report.custom_tests_executed == len(request.tests)
     assert all(test.assertions for test in report.tests)
+
+
+def test_real_creation_composition_storage_and_preview(tmp_path):
+    """Compose output must survive real storage checks and isolated preview publication unchanged."""
+    from types import SimpleNamespace
+    from server.remotion_templates.harness import Harness
+    from server.remotion_templates.provider import Budget
+    from server.remotion_templates.tools.catalog import available
+    from server.remotion_templates.tools.contracts import PresetDraft, SpriteComposeInput, SpriteCreateInput
+    from server.remotion_templates.tools.session import ToolSession
+
+    async def run():
+        """Use real files, compiler and browser while excluding models and semantic indexing."""
+        renderer = validator(tmp_path).renderer
+        harness = Harness(SimpleNamespace(settings=renderer.settings), renderer)
+        session = ToolSession(harness, None, None, Budget(), tmp_path / "run", [], lambda *_: None, {})
+        preset = await session.execute("preset.create", PresetDraft(description="fade title", **component().model_dump()), available())
+        composed = await session.execute("sprite.compose", SpriteComposeInput.model_validate({
+            "description": "title preview", "instances": [{
+                "instance_id": "title", "source": {"kind": "stored", "preset_id": preset["preset"]["preset_id"]},
+                "layout": {"x": 0, "y": 0, "width": 1080, "height": 1920, "z_index": 0},
+                "timing": {"start_frame": 0, "duration_frames": 150},
+            }],
+        }), available())
+        saved = await session.execute("sprite.create", SpriteCreateInput.model_validate(composed), available())
+        assert saved["sprite"]["code"] == composed["sprite"]["code"]
+        result = await harness.finalize_sprite(session, saved["sprite"]["sprite_id"], Budget(), tmp_path)
+        assert result[2].passed
+        assert (result[3] / "interactive.js").stat().st_size > 0
+        assert (result[3] / "Export.tsx").stat().st_size > 0
+
+    asyncio.run(run())
