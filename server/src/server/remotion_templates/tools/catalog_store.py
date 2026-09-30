@@ -2,7 +2,8 @@
 
 MySQL 复用 `server.database` 的 `DatabaseSettings` 与连接池，表在首次写入或读取时创建；
 数据库不可用时回退到模块数据目录下的 `pr76_catalog/`，保证本地与离线开发仍可保存 Preset。
-两条路径都只追加不可变记录，不提供覆盖更新或删除。
+两条路径都只追加不可变记录，不提供覆盖更新或删除。写入返回实际使用的后端，
+读取始终合并本地兜底文件，避免一次本地兜底写入在数据库恢复后变得不可见。
 """
 
 from __future__ import annotations
@@ -58,14 +59,21 @@ class CatalogStore:
         return engine
 
     def read_presets(self) -> list[PresetRecord]:
-        """读取全部记录；数据库可用时以数据库为准，否则使用本地兜底。"""
+        """读取全部记录。
+
+        数据库可用时以数据库为主，但必须合并本地兜底文件：一次写入在 INSERT
+        失败时会落到本地，若只读数据库，这条已确认保存的记录会凭空消失。
+        """
         try:
             engine = self._engine()
         except SQLAlchemyError:
             return self._read_records("presets", PresetRecord)
         with engine.connect() as connection:
             rows = connection.execute(select(presets.c.payload).order_by(presets.c.preset_id))
-            return [PresetRecord.model_validate(row.payload) for row in rows]
+            remote = [PresetRecord.model_validate(row.payload) for row in rows]
+        seen = {item.preset_id for item in remote}
+        # 本地兜底记录排在末尾；同 ID 已由数据库提供时以数据库为准。
+        return remote + [item for item in self._read_records("presets", PresetRecord) if item.preset_id not in seen]
 
     def append_preset(self, record: PresetRecord) -> str:
         """追加一条记录并返回实际使用的后端；数据库写入失败时回退到本地目录。"""
@@ -95,16 +103,18 @@ class CatalogStore:
         self._write_records("presets", records)
 
     def read_sprites(self) -> list[SpriteRecord]:
-        """读取任务所属的 Sprite 记录；与 Preset 相同，数据库优先、本地兜底。"""
+        """读取任务所属的 Sprite 记录；Sprite 只保存在任务本地目录。"""
         return self._read_records("sprites", SpriteRecord)
 
-    def append_sprite(self, record: SpriteRecord) -> None:
-        """追加一条 Sprite 记录，重复 ID 不产生第二份副本。"""
+    def append_sprite(self, record: SpriteRecord) -> str:
+        """追加一条 Sprite 记录并返回实际使用的后端；写入失败时向上抛出。"""
         records = self.read_sprites()
         if any(item.sprite_id == record.sprite_id for item in records):
-            return
+            return "local"
         records.append(record)
+        # 这里不吞异常：写不进去时必须让调用方看到失败，而不是返回成功回执。
         self._write_records("sprites", records)
+        return "local"
 
     def _records_path(self, category: str) -> Path:
         """返回某一类不可变记录的本地文件位置。"""
@@ -120,6 +130,7 @@ class CatalogStore:
 
     def _write_records(self, category: str, records) -> None:
         """原子替换本地记录文件，不暴露半完成状态。"""
+        self.root.mkdir(parents=True, exist_ok=True)
         path = self._records_path(category)
         temporary = path.with_suffix(".tmp")
         temporary.write_text(

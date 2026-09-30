@@ -14,6 +14,7 @@ from server.remotion_templates.tools.contracts import (
     CodeValidationReport,
     ComponentDefinition,
     PresetDraft,
+    PresetRecord,
     SpriteComposeInput,
     SpriteCreateInput,
 )
@@ -177,3 +178,55 @@ def test_mysql_preset_create_persists_through_the_catalog_store(tmp_path):
         assert current.catalog.find_preset(saved["preset"]["preset_id"]).description == "title"
 
     asyncio.run(run())
+
+
+def test_local_fallback_preset_stays_readable_after_database_recovers(tmp_path):
+    """INSERT 失败落到本地兜底后，数据库恢复时读取仍须看到这条已保存记录。
+
+    若只读数据库，一次已返回成功的 Preset 会在恢复后消失，而 Agent 拿到的
+    preset_id 再也解析不到。
+    """
+    from sqlalchemy.exc import OperationalError
+
+    from server.remotion_templates.tools.catalog_store import CatalogStore
+
+    store = CatalogStore(tmp_path / "catalog")
+    record = PresetRecord(
+        preset_id="fallback-1",
+        created_at="2026-09-30T00:00:00+00:00",
+        description="兜底预设",
+        code="export default function C(){return null}",
+        parameter_schema={"type": "object", "properties": {}, "additionalProperties": False},
+        default_parameters={},
+    )
+
+    class BrokenInsert:
+        """探活成功但写入失败，模拟提交阶段的数据库故障。"""
+
+        def begin(self):
+            raise OperationalError("insert failed", {}, Exception())
+
+    store._engine = lambda: BrokenInsert()
+    assert store.append_preset(record) == "local"
+
+    class RecoveredEngine:
+        """数据库恢复且目标表为空，本地兜底记录不得因此消失。"""
+
+        def connect(self):
+            class Connection:
+                """返回空结果集，代表服务端尚未包含这条记录。"""
+
+                def execute(self, *_args, **_kwargs):
+                    return []
+
+                def __enter__(self):
+                    return self
+
+                def __exit__(self, *_args):
+                    return False
+
+            return Connection()
+
+    store._engine = lambda: RecoveredEngine()
+    assert [item.preset_id for item in store.read_presets()] == ["fallback-1"]
+    assert store.find_preset("fallback-1").description == "兜底预设"
