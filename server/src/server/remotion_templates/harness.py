@@ -2,9 +2,10 @@
 
 from pathlib import Path
 from uuid import uuid4
+from pydantic import Field
 
 from .context import Conversation
-from .models import DialogueOutput
+from .models import Contract, DialogueOutput, TemplateSpec
 from .parameters import patch_parameters
 from .provider import Budget, Provider, ExecutionFailure
 from .publication import PresentationBuilder
@@ -17,6 +18,42 @@ AGENT_RULES = """Use the declared creation tools. Understand the requirement and
 
 # The temporary workflow deliberately omits search, indexing and model-authored tests.
 CREATION_RULES = """Current workflow: preset.create → sprite.compose → sprite.create → Outer complete. Write complete single-file Remotion TSX with a parameter schema and defaults matching the user request. Create the Preset, compose explicit instances using its returned preset_id, then save the exact Sprite draft returned by compose without editing its code/schema/defaults. The host automatically compiles and mounts the saved Sprite, then builds the preview when Outer returns {"action":"complete","sprite_id":"saved ID"}. Repair actual tool errors. Never invent IDs or observations. Use tools.inspect for the three creation tool schemas if needed. Do not import external packages, call network, install dependencies or register a Composition in component source. Ordinary answers never substitute for creating the requested Sprite."""
+
+
+class CodeOutput(Contract):
+    """Legacy structured output shape retained so unrelated existing tests can collect."""
+
+    tsx_code: str = Field(min_length=1, max_length=100_000)
+    spec: TemplateSpec | None = None
+
+
+def controls(spec: TemplateSpec) -> tuple[dict, dict]:
+    """Flatten legacy text-layer scalar controls for the existing template API."""
+    properties, defaults = {}, {}
+
+    def walk(value, parts: list[str]) -> None:
+        """Visit scalar leaves while preserving stable JSON pointer targets."""
+        if isinstance(value, dict):
+            for key, child in value.items():
+                walk(child, parts + [key])
+        elif isinstance(value, list):
+            for index, child in enumerate(value):
+                walk(child, parts + [str(index)])
+        else:
+            name = "_".join(parts[1:])
+            definition = {"type": "string" if isinstance(value, str) else "number", "x-imv-target": "/" + "/".join(parts)}
+            if parts[-1] == "font_family":
+                definition["enum"] = ["Noto Sans CJK SC"]
+            if parts[-1] == "font_weight":
+                definition["enum"] = [400, 700]
+            if parts[-1] == "align":
+                definition["enum"] = ["left", "center", "right"]
+            properties[name], defaults[name] = definition, value
+
+    for index, layer in enumerate(spec.text_layers):
+        for field in ("text", "layout", "style"):
+            walk(layer.model_dump()[field], ["text_layers", str(index), field])
+    return {"type": "object", "properties": properties, "required": list(properties), "additionalProperties": False}, defaults
 
 
 class Harness:
@@ -49,7 +86,7 @@ class Harness:
         else:
             validation = session.validation_for(sprite)
         if validation is None or not validation.passed:
-            raise ValueError("The host must validate the exact final Sprite, defaults and duration before completing")
+            raise ValueError("Validate the exact final Sprite, defaults and duration with the host before completing")
         budget.progress("preparing")
         return await self.presentation.build(sprite, sprite.default_parameters, validation, directory / ("result-" + uuid4().hex))
 
