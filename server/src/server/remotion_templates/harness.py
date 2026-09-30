@@ -5,7 +5,7 @@ from uuid import uuid4
 from pydantic import Field
 
 from .context import Conversation
-from .models import Contract, DialogueOutput, TemplateSpec
+from .models import Contract, TemplateSpec
 from .parameters import patch_parameters
 from .provider import Budget, Provider, ExecutionFailure
 from .publication import PresentationBuilder
