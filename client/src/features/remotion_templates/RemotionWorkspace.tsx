@@ -13,7 +13,7 @@ import {
 import { capabilities } from "./api";
 import { ChatPanel } from "./ChatPanel";
 import { CompositionSettings } from "./CompositionSettings";
-import { compositionSummary } from "./composition";
+import { compositionSummary, resolveComposition } from "./composition";
 import { WorkspacePanels } from "./WorkspacePanels";
 import { useTemplateVersions } from "./useTemplateVersions";
 import { ParametersPanel } from "./ParametersPanel";
@@ -61,6 +61,8 @@ export function RemotionWorkspace() {
     unresolved ||
     session.retryMode === "read";
   const locked = pending || previewBusy || session.previewLoading;
+  const configurationError =
+    !session.workId && resolveComposition(session.compositionDraft).error;
   return (
     <div className="space-y-2">
       {serviceError && (
@@ -162,13 +164,20 @@ export function RemotionWorkspace() {
               locked ||
               historical ||
               session.dirty ||
-              !!serviceError
+              !!serviceError ||
+              !!configurationError
             }
             canStop={unresolved && !session.deleting}
             first={!session.workId}
             configuration={
               !session.workId ? (
-                <CompositionSettings />
+                <CompositionSettings
+                  value={session.compositionDraft}
+                  disabled={locked}
+                  onChange={(value) => {
+                    if (!locked) session.configure(value);
+                  }}
+                />
               ) : session.version ? (
                 <p
                   className="text-xs text-muted-foreground"

@@ -21,6 +21,7 @@ from .contracts import (
     SpriteRecord,
     SpriteCreateOutput,
 )
+from .catalog_store import CatalogStore
 from .registry import ToolFault
 from .schema import merge_parameters, validate_component_contract, validate_parameters
 from .compose import compose_source
@@ -45,11 +46,13 @@ class ToolSession:
             root = Path(__file__).parent.parent / root
         self.pr76_root = root / "pr76_catalog"
         self.pr76_root.mkdir(parents=True, exist_ok=True)
+        self.catalog = CatalogStore(self.pr76_root)
         self.latest_sprite_id: str | None = None
         self.saved_sprites: dict[str, SpriteRecord] = {}
         self.validation_reports: dict[str, RenderValidationReport] = {}
         self._last_component_sprite: SpriteDraft | None = None
         self.feedback = []
+        self.catalog_backend = "unset"
         self.operation = ""
         self.validator = None
         try:
@@ -70,6 +73,7 @@ class ToolSession:
             "last_validation": {
                 key: report.model_dump(mode="json") for key, report in self.validation_reports.items()
             },
+            "preset_backend": self.catalog_backend,
             "feedback": list(self.feedback),
         }
 
@@ -118,31 +122,12 @@ class ToolSession:
         }
         return hashlib.sha256(json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
 
-    def _json_path(self, category: str) -> Path:
-        """Return the private PR76 catalog file for one immutable record category."""
-        return self.pr76_root / f"{category}.json"
-
-    def _read_records(self, category: str, model):
-        """Read and validate the private catalog; malformed records stop the operation."""
-        path = self._json_path(category)
-        if not path.exists():
-            return []
-        values = json.loads(path.read_text(encoding="utf-8"))
-        return [model.model_validate(item) for item in values]
-
-    def _write_records(self, category: str, records) -> None:
-        """Atomically persist PR76 records without exposing a partial catalog."""
-        path = self._json_path(category)
-        temporary = path.with_suffix(".tmp")
-        temporary.write_text(json.dumps([item.model_dump(mode="json", exclude_unset=True) for item in records], ensure_ascii=False), encoding="utf-8")
-        temporary.replace(path)
-
     def _find_preset(self, preset_id: str) -> PresetDraft:
-        """Resolve a Preset ID only from the immutable PR76 catalog."""
-        for record in self._read_records("presets", PresetRecord):
-            if record.preset_id == preset_id:
-                return record
-        raise ToolFault("PRESET_NOT_FOUND", f"Unknown preset: {preset_id}")
+        """Resolve a Preset ID from the immutable catalog; unknown IDs fail loudly."""
+        record = self.catalog.find_preset(preset_id)
+        if record is None:
+            raise ToolFault("PRESET_NOT_FOUND", f"Unknown preset: {preset_id}")
+        return record
 
     async def validate_pr76_code(self, component: ComponentDefinition) -> CodeValidationReport:
         """Run the isolated PR76 code validator and preserve real diagnostics."""
@@ -179,11 +164,8 @@ class ToolSession:
             created_at=datetime.now(UTC).isoformat(),
             **request.model_dump(mode="json", exclude_unset=True),
         )
-        records = self._read_records("presets", PresetRecord)
-        records.append(record)
-        self._write_records("presets", records)
-        if not self.harness.settings.creation_only:
-            raise ToolFault("SEARCH_UNAVAILABLE", "This focused build only supports local Preset creation.")
+        # Presets persist to MySQL with a local fallback; the record is immutable once saved.
+        self.catalog_backend = self.catalog.append_preset(record)
         return PresetCreateOutput(preset=record, validation=validation)
 
     async def create_pr76_sprite(self, sprite: SpriteDraft) -> SpriteCreateOutput:
@@ -237,9 +219,7 @@ class ToolSession:
             created_at=datetime.now(UTC).isoformat(),
             **sprite.model_dump(mode="json", exclude_unset=True),
         )
-        records = self._read_records("sprites", SpriteRecord)
-        records.append(record)
-        self._write_records("sprites", records)
+        self.catalog.append_sprite(record)
         self.saved_sprites[record.sprite_id] = record
         self.latest_sprite_id = record.sprite_id
         self._last_component_sprite = record

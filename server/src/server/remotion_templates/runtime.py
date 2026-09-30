@@ -240,7 +240,7 @@ class Runtime:
                     "clarifications": inputs.clarifications,
                     "accepted_base": base.spec.model_dump(mode="json", exclude_unset=True) if base else None,
                     "current_component": base.candidate.model_dump(mode="json") if base else None,
-                    "reference_images": [settings.tool_asset_base_url.rstrip("/").removesuffix("/tool-assets") + "/assets/" + str(project.request.image.asset_id)] if project.request.image else [],
+                    "reference_images": [{"asset_id": str(project.request.image.asset_id)}] if project.request.image else [],
                 }
                 if patch is None and base and base.source == "user_parameters":
                     baseline = self.store.version(base.agent_base_version_id)

@@ -116,8 +116,6 @@ async def create(
     `description` 与 `image` 至少提供一种；可通过 `composition` 设置画布和时长。
     返回 202 及 `work`、`job`，随后使用任务 ID 查询进度；模型未配置时返回 503。
     """
-    if (request.composition.width, request.composition.height, request.composition.fps) != (1080, 1920, 30):
-        raise HTTPException(422, "主画布固定为 1080×1920、30 FPS")
     settings = service.settings.model_copy(update=config.model_dump()) if config is not None else service.settings
     if not settings.models_configured:
         raise HTTPException(503, "请配置 Agent 模型及密钥")
@@ -410,17 +408,6 @@ def asset_image(asset_id: UUID, service: Service) -> Response:
         media_type="image/png",
         headers={"Cache-Control": "private, max-age=3600"},
     )
-
-
-@router.get("/tool-assets/{filename}", tags=["参考素材"], summary="读取图片工具产物")
-def tool_asset(filename: str, service: Service) -> FileResponse:
-    """Serve only PNGs created by image.resize/crop from the private tool directory."""
-    if not re.fullmatch(r"[0-9a-f]{32}\.png", filename):
-        raise NotFound("tool image not found")
-    path = service.settings.data_dir / "tool-images" / filename
-    if not path.is_file():
-        raise NotFound("tool image not found")
-    return FileResponse(path, media_type="image/png", headers={"Cache-Control": "private, max-age=3600"})
 
 
 @router.get(

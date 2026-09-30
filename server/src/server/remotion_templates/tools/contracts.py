@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from typing import Annotated, Any, Generic, Literal, TypeVar
+from uuid import UUID
 
 from pydantic import (
     BaseModel, BeforeValidator, ConfigDict, Field, StrictBool, StrictFloat,
@@ -98,8 +99,8 @@ class PresetRecord(PresetDraft):
     preset_id: PresetId
     created_at: Timestamp
 
+# create 承接 Agent 已写好的完整定义；输入模型与 PresetDraft 完全相同。
 PresetCreateInput = PresetDraft
-
 
 class PresetCreateOutput(ContractModel):
     """新记录和本次入库的代码校验报告。"""
@@ -107,6 +108,102 @@ class PresetCreateOutput(ContractModel):
     preset: PresetRecord
     validation: CodeValidationReport
 
+
+
+# 工具入参以文档化的 JSON 字符串传递；宿主内部继续用 UUID 对象引用同一素材。
+AssetId = Annotated[UUID, BeforeValidator(lambda value: value if isinstance(value, UUID) else UUID(str(value)))]
+
+
+# 用户上传的参考图由服务端登记为本地素材；图片工具按该引用读取，不使用 URL。
+class ImageReference(ContractModel):
+    """已上传并登记的参考图片。"""
+
+    asset_id: AssetId
+
+
+# 图片工具直接读取任务参考图：用户上传后已由服务端登记为本地素材，无需 URL、不上传云端。
+class ImageInfoInput(ContractModel):
+    """待读取的任务参考图片。"""
+
+    image: ImageReference
+
+
+class ImageInfo(ContractModel):
+    """实际读取到的图片信息。"""
+
+    width: PositiveInteger
+    height: PositiveInteger
+    mime_type: Literal["image/png", "image/jpeg", "image/webp"]
+    size_bytes: PositiveInteger
+    has_alpha: bool
+
+
+class ProcessedImage(ImageInfo):
+    """处理后的图片信息；结果同样保存在服务端素材目录，供后续工具继续读取。"""
+
+    image: ImageReference
+
+
+class ImageResizeInput(ImageInfoInput):
+    """指定强制缩放后的目标像素宽高。"""
+
+    width: PositiveInteger
+    height: PositiveInteger
+
+
+class ImageCropInput(ImageInfoInput):
+    """相对原图左上角的像素裁剪区域。"""
+
+    x: NonNegativeInteger
+    y: NonNegativeInteger
+    width: PositiveInteger
+    height: PositiveInteger
+
+
+# --- preset tool contracts (doc section 6) ------------------------------------
+
+# create 承接 Agent 已写好的完整定义；输入模型即 PresetDraft。
+
+class PresetSearchInput(ContractModel):
+    """自然语言检索描述与结果数量上限。"""
+
+    query: Description
+    limit: PositiveInteger = 5
+
+
+class PresetSearchMatch(ContractModel):
+    """按相关性排序的完整预设记录。"""
+
+    rank: PositiveInteger
+    preset: PresetRecord
+
+
+class PresetSearchOutput(ContractModel):
+    """检索结果列表，允许为空。"""
+
+    matches: list[PresetSearchMatch]
+
+
+class PresetChanges(ContractModel):
+    """仅替换显式提供的字段；工具还须检查至少提供一项。"""
+
+    code: Omittable[str]
+    description: Omittable[Description]
+    parameter_schema: Omittable[JsonSchema]
+    default_parameters: Omittable[JsonObject]
+
+
+class PresetModifyInput(ContractModel):
+    """原记录 ID 和 Agent 已经改好的替换内容。"""
+
+    preset_id: PresetId
+    changes: PresetChanges
+
+
+class PresetModifyOutput(ContractModel):
+    """完整副本，不含新记录 ID。"""
+
+    preset: PresetDraft
 
 
 class Composition(ContractModel):
@@ -311,7 +408,10 @@ class RenderValidationReport(ContractModel):
 
 
 ToolName = Literal[
-    "preset.create", "sprite.compose", "sprite.create", "tools.inspect",
+    "image.info", "image.resize", "image.crop",
+    "preset.search", "preset.create", "preset.modify",
+    "validate.code", "validate.render", "sprite.compose", "sprite.create",
+    "tools.inspect",
 ]
 
 

@@ -55,11 +55,19 @@ def draft() -> PresetDraft:
     )
 
 
-def test_only_creation_tools_are_public():
-    """The focused build does not expose image, search or validation business tools."""
+def test_full_catalog_is_registered_but_only_implemented_tools_are_public():
+    """The documented catalog registers eleven tools; deferred ones stay out of the model window."""
     names = {item.name for item in registered_tools()}
-    assert names == {"preset.create", "sprite.compose", "sprite.create", "tools.inspect"}
-    assert {item.name for item in available()} == names | {"tools.plan_execute"}
+    assert names == {
+        "image.info", "image.resize", "image.crop",
+        "preset.search", "preset.create", "preset.modify",
+        "validate.code", "validate.render", "sprite.compose", "sprite.create",
+        "tools.inspect",
+    }
+    implemented = {item.name for item in registered_tools() if item.implemented}
+    assert implemented == {"preset.create", "sprite.compose", "sprite.create", "tools.inspect"}
+    assert {item.name for item in available()} == implemented | {"tools.plan_execute"}
+    assert {item.name for item in available(creation_only=True)} == implemented | {"tools.plan_execute"}
 
 
 @pytest.mark.skipif(not RENDERER_DEPS.exists(), reason="install locked Remotion renderer dependencies")
@@ -84,7 +92,8 @@ def test_creation_flow_persists_one_sprite_without_semantic_index(tmp_path):
         )
         saved = await current.execute("sprite.create", SpriteCreateInput.model_validate(composed), available())
         assert saved["sprite"]["code"] == composed["sprite"]["code"]
-        assert len(current._read_records("sprites", type(current.saved_sprites[next(iter(current.saved_sprites))]))) == 1
+        assert len(current.saved_sprites) == 1
+        assert len(current.catalog.read_sprites()) == 1
 
     asyncio.run(run())
 

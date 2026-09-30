@@ -32,6 +32,7 @@ class RegisteredTool:
     output: TypeAdapter
     function: object
     descriptor: ToolDescriptor
+    implemented: bool = True
 
     @property
     def input(self) -> type[BaseModel]:
@@ -86,6 +87,7 @@ def tool(
     side_effects: list[str] | tuple[str, ...] = (),
     error_codes: list[str] | tuple[str, ...] = (),
     examples: list[dict[str, Any]] | tuple[dict[str, Any], ...] = (),
+    implemented: bool = True,
 ):
     """Decorate an async ``(owner, request)`` handler and register its exact contract."""
 
@@ -115,7 +117,7 @@ def tool(
             error_codes=list(error_codes),
             examples=list(examples),
         )
-        _TOOLS[name] = RegisteredTool(name, model, output, function, descriptor)
+        _TOOLS[name] = RegisteredTool(name, model, output, function, descriptor, implemented)
         return function
 
     return decorate

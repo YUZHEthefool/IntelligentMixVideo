@@ -130,19 +130,18 @@ class AgentRun:
         }[self.layer]
 
     def _tools_for_layer(self):
-        """Return only tools allowed to the active role."""
+        """Return only tools allowed to the active role; deferred tools never appear."""
+        creation_only = getattr(self.harness.settings, "creation_only", False)
         if self.layer is Layer.OUTER:
             if self.state.plan is not None:
                 return [PLAN_TOOL]
-            tools = available(None)
-        elif self.layer is Layer.PLAN:
+            return available(None, creation_only=creation_only)
+        if self.layer is Layer.PLAN:
             return [PLAN_TOOL]
-        else:
-            step = self.state.step
-            tools = available(step.tool_modules if step else [], executor=True)
-        if getattr(self.harness.settings, "creation_only", False):
-            tools = [tool for tool in tools if tool.name in {"preset.create", "sprite.compose", "sprite.create", "tools.inspect", "tools.plan_execute"}]
-        return tools
+        step = self.state.step
+        return available(
+            step.tool_modules if step else [], executor=True, creation_only=creation_only
+        )
 
     def _rules_for_layer(self):
         """Return protocol instructions for exactly one model role."""
@@ -346,7 +345,7 @@ class AgentRun:
                         data = self.state.snapshot()
                         self.stalled_turns += 1
                     else:
-                        if tool.name.startswith(("preset.create", "preset.modify", "sprite.", "validate.")):
+                        if tool.name in {"preset.create", "sprite.compose", "sprite.create"}:
                             self.generation_started = True
                         data = await self.session.execute(tool.name, args, visible)
                         self._observe_receipt(tool.name, data)
