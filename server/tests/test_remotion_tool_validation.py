@@ -3,7 +3,9 @@
 import asyncio
 from pathlib import Path
 
-from server.remotion_templates.tool_validation import ToolValidator
+import pytest
+
+from server.remotion_templates.tool_validation import ToolValidator, ValidationUnavailable
 from server.remotion_templates.tools.contracts import (
     ComponentDefinition,
     RenderValidationInput,
@@ -92,3 +94,27 @@ def test_invalid_defaults_stop_custom_tests(tmp_path):
     assert report.passed is False
     assert report.custom_tests_executed == 0
     assert report.tests[0].status == "not_run"
+
+
+@pytest.mark.parametrize("runtime_error", [None, "ENOENT: no such file or directory, mkdtemp '/work/.tmp/puppeteer_dev_chrome_profile-test'"])
+def test_incomplete_render_report_preserves_runtime_error(tmp_path, monkeypatch, runtime_error):
+    """Browser startup errors reach the caller; unexplained omissions still fail closed."""
+    renderer = FakeRenderer()
+    original = renderer.run_worker
+
+    async def incomplete_report(directory, **kwargs):
+        """Simulate a worker that stops before recording either base render check."""
+        payload = await original(directory, **kwargs)
+        if directory.name.startswith("validate-render-"):
+            payload["checks"] = payload["checks"][:3]
+            if runtime_error:
+                payload["checks"].append({"name": "runtime", "status": "error", "message": runtime_error})
+            payload.update(passed=False, tests=[], custom_tests_executed=0)
+        return payload
+
+    monkeypatch.setattr(renderer, "run_worker", incomplete_report)
+    request = RenderValidationInput(component=component(), duration_frames=30, tests=[])
+    with pytest.raises(ValidationUnavailable) as failure:
+        asyncio.run(ToolValidator(renderer, tmp_path).validate_render(request))
+    expected = runtime_error or "Render validation worker returned an incomplete report"
+    assert expected in str(failure.value)

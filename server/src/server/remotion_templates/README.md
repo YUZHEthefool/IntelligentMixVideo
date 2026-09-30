@@ -33,6 +33,16 @@
 
 ## 工具与完成条件
 
+当前默认 `IMV_CREATION_ONLY=true`，临时只向 Agent 提供 `preset.create`、
+`sprite.compose`、`sprite.create`、`tools.inspect` 和计划控制。
+实际流程为 **创建 Preset → 组合 → 保存 Sprite → Outer 请求完成 → 宿主生成预览**。
+创建 Preset 仅保存本地记录，不调用 ChromaDB 或下载嵌入模型；搜索、修改、图片工具和
+Agent 显式校验暂不开放。宿主保留代码/参数合法性、隔离编译和基础挂载检查，
+自动生成无自定义脚本的真实回执后构建、封存预览，不声称验证了用户需求或视觉效果。
+
+以下是保留的完整工具目录和 `IMV_CREATION_ONLY=false` 时的流程；重新启用语义搜索前，
+需为精简模式下新建的 Preset 补建索引（当前不自动补建）。
+
 | 模块 | 工具 |
 | --- | --- |
 | 图片 | `image.info`、`image.resize`、`image.crop`（不含超分） |
@@ -50,11 +60,19 @@ validate.render → 根据实际诊断修复 → sprite.create → Outer 请求�
 Preset 修改返回副本，不覆盖原记录。组合保留独立实例参数、局部帧与局部画布；同一 Preset
 可以多次使用。参数以默认值为基底递归合并对象，数组、标量和 null 整体替换。
 创建工具检查代码和数据一致性；工具保存不自动创建聊天成功版本。
+组合器使用 TypeScript AST 规范化打包后的默认导出与参数类型，保留默认值和解构语法；
+原始 Preset 独立检查，组合结果可原样交给 `sprite.create` 并构建预览。
 
 `validate.render` 实际运行默认参数和配置参数，并执行提交的 TypeScript 断言。
 没有断言的脚本报错；即使脚本捕获断言异常，失败记录仍保留。每份脚本从第 0 帧和输入参数
 重新开始。最后可访问帧为 `duration_frames - 1`，不静默截断越界帧。
 工具不截图、不抽帧、不做视觉评审；没有提供的测试不声称已经覆盖。
+工具描述直接提供 `TestContext` 方法签名、元素快照结构及帧范围；
+`tools.inspect("validate.render")` 提供实际可运行的文字与参数断言示例。
+测试使用 `export default async function run(ctx)`，通过 `ctx.query` 读取页面，
+通过 `ctx.assert/assert_equal/assert_close` 记录断言；不导入 Vitest，不使用 `ctx.props/check`。
+隔离 worker 在启动浏览器前创建本次校验的 `.tmp` 目录；运行环境错误保留原始诊断，
+以 `VALIDATION_UNAVAILABLE` 返回，不视为组件断言失败，也不以“报告不完整”覆盖原因。
 
 最终完成必须引用本任务保存的 Sprite，且存在与代码、Schema、默认参数、时长完全对应的
 最新通过回执。失败的再次检查会覆盖此前通过状态。宿主随后隔离构建 `Export.tsx` 和
@@ -100,7 +118,9 @@ IMV_TOOL_ASSET_BASE_URL=http://127.0.0.1:20070/api/templates/tool-assets
 | `IMV_MAX_PLAN_CALLS / TOKENS` | 12 / 80000 | Plan 分类额度 |
 | `IMV_MAX_EXECUTOR_CALLS / TOKENS` | 24 / 160000 | Executor 分类额度 |
 | `IMV_MAX_STEPS / IMV_MAX_TOOLUSE` | 8 / 10 | 执行批次、每批工具上限，始终生效 |
-| `IMV_MAX_NO_PROGRESS_TURNS` | 4 | 连续无有效新观察保护 |
+| `IMV_CREATION_ONLY` | true | 暂时只开放创建、组合、保存；宿主自动构建预览 |
+| `IMV_ENFORCE_NO_PROGRESS` | false | 暂时关闭无进展终止，仍记录计数；设为 true 恢复 |
+| `IMV_MAX_NO_PROGRESS_TURNS` | 4 | 开启无进展保护时使用的停止阈值 |
 | `IMV_MODEL_TIMEOUT_SECONDS` | 240 | HTTP 读写空闲超时 |
 | `IMV_JOB_TIMEOUT_SECONDS` | 600 | 全任务执行超时，不含排队 |
 | `IMV_RENDER_TIMEOUT_SECONDS` | 180 | 隔离进程超时 |

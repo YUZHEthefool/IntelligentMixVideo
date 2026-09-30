@@ -181,6 +181,10 @@ class ToolValidator:
         raw_checks = payload.get("checks")
         if not isinstance(raw_checks, list):
             raise ValidationUnavailable("Render validation worker returned no checks")
+        # A worker startup/runtime error explains missing checks; preserve its diagnostic.
+        for item in raw_checks:
+            if isinstance(item, dict) and item.get("name") == "runtime" and item.get("status") == "error":
+                raise ValidationUnavailable(str(item.get("message") or "Render validation worker runtime error"))
         check_names = {str(item.get("name")) for item in raw_checks if isinstance(item, dict)}
         if not {"source_policy", "export_source", "typescript", "default_render", "configured_render"} <= check_names:
             raise ValidationUnavailable("Render validation worker returned an incomplete report")

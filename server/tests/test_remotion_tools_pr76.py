@@ -63,6 +63,32 @@ def test_pr76_tools_are_decorator_registered():
     assert {"image.info", "image.resize", "image.crop", "validate.render", "sprite.compose"} <= available_names
 
 
+def test_creation_only_persists_preset_without_semantic_index(tmp_path, monkeypatch):
+    """A local Preset remains usable when embedding downloads and indexing are disabled."""
+    from types import SimpleNamespace
+    from server.remotion_templates.provider import Budget
+    from server.remotion_templates.tools.contracts import CodeValidationReport
+    from server.remotion_templates.tools.session import ToolSession
+
+    settings = Settings(_env_file=None, data_dir=tmp_path)
+    settings.creation_only = True
+    session = ToolSession(SimpleNamespace(settings=settings, renderer=None), None, None, Budget(), tmp_path, [], lambda *_: None, {})
+
+    async def validate(_component):
+        """Keep this test focused on durable storage rather than compiler behavior."""
+        return CodeValidationReport(passed=True, diagnostics=[])
+
+    def index(*_args):
+        """Any indexing attempt violates creation-only mode."""
+        pytest.fail("Creation must not invoke the embedding runtime")
+
+    monkeypatch.setattr(session, "validate_pr76_code", validate)
+    monkeypatch.setattr(session.semantic_index, "upsert", index)
+    draft = PresetDraft(description="title", code="export default function Label(){return null}", parameter_schema={"type": "object", "properties": {}, "additionalProperties": False}, default_parameters={})
+    result = asyncio.run(session.create_pr76_preset(draft))
+    assert session._find_preset(result.preset.preset_id) == result.preset
+
+
 def test_image_resize_and_crop_preserve_source_and_bounds(monkeypatch, tmp_path):
     """Resize forces exact pixels, crop rejects overflow, and source files remain untouched."""
     monkeypatch.setattr("server.remotion_templates.tools.image_tools.httpx.AsyncClient", _MockClient)

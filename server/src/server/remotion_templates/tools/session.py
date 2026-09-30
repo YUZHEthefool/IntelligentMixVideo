@@ -205,6 +205,8 @@ class ToolSession:
         records = self._read_records("presets", PresetRecord)
         records.append(record)
         self._write_records("presets", records)
+        if self.harness.settings.creation_only:
+            return PresetCreateOutput(preset=record, validation=validation)
         try:
             await asyncio.wait_for(
                 asyncio.to_thread(self.semantic_index.upsert, record.preset_id, record.description), timeout=30

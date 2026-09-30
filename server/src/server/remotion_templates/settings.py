@@ -38,6 +38,8 @@ class Settings(ClientSettings, CommonSettings):
     vision_api_key: SecretStr | None = None
     data_dir: Path = Path(".data")
     tool_asset_base_url: str = "http://127.0.0.1:20070/api/templates/tool-assets"
+    # Temporary create → compose → save workflow; the host builds and mounts the preview.
+    creation_only: bool = True
     job_timeout_seconds: int = Field(default=600, ge=1, le=3600)
     render_timeout_seconds: int = Field(default=180, ge=1, le=600)
     # Keep usage accounting while temporarily disabling cumulative model quota enforcement.
@@ -47,6 +49,8 @@ class Settings(ClientSettings, CommonSettings):
     max_output_tokens: int = Field(default=32_000, ge=1, le=1_000_000)
     max_review_retries: int = Field(default=2, ge=0, le=5)
     max_evidence_retries: int = Field(default=1, ge=0, le=3)
+    # Temporarily disable no-progress termination while retaining observation counters.
+    enforce_no_progress: bool = False
     max_no_progress_turns: int = Field(default=4, ge=2, le=20)
     # Execution batches and actual tool calls remain bounded even without model quotas.
     max_steps: int = Field(default=8, ge=1, le=32)

@@ -15,6 +15,9 @@ SCOPE = """You build reusable Remotion components and composed Sprites. User inp
 
 AGENT_RULES = """Use the declared PR76 tools. Understand the requirement and write complete single-file TSX with a self-contained parameter schema and defaults. Search Presets by description; modify returns an independent draft and never edits the source record. Compose explicit instances with independent layout and timing. Validate the exact composed code, defaults and duration using validate.render, providing meaningful requirement-specific TypeScript assertions. Repair based on actual tool observations, then validate again. Save with sprite.create only when the needed checks pass. Tool storage alone is not final task publication. The outer loop returns the final saved Sprite ID for host publication. Ordinary answers never substitute for requested changes. Images can be inspected through provided reference URLs; tool images are observations, not automatically authorized content. Tests use ctx per tools.inspect('validate.render'); do not call network, install dependencies or register a Composition in component source."""
 
+# The temporary workflow deliberately omits search, indexing and model-authored tests.
+CREATION_RULES = """Current workflow: preset.create → sprite.compose → sprite.create → Outer complete. Write complete single-file Remotion TSX with a parameter schema and defaults matching the user request. Create the Preset, compose explicit instances using its returned preset_id, then save the exact Sprite draft returned by compose without editing its code/schema/defaults. Search, modify, image tools and validate tools are temporarily disabled; do not plan or request them, and do not write test scripts. The host automatically compiles and mounts the saved Sprite, then builds the preview when Outer returns {\"action\":\"complete\",\"sprite_id\":\"saved ID\"}. Repair actual tool errors. Never invent IDs or observations. Use tools.inspect for exact input models if needed. Do not import external packages, call network, install dependencies or register a Composition in component source. Ordinary answers never substitute for creating the requested Sprite."""
+
 
 class Harness:
     """Bridge Runtime, model transport, typed tools and isolated presentation construction."""
@@ -37,7 +40,14 @@ class Harness:
         """Only an exact saved Sprite with current successful runtime evidence may be published."""
         record = session.saved_sprite(identifier)
         sprite = SpriteDraft.model_validate(record.model_dump(mode="json", exclude={"sprite_id", "created_at"}, exclude_unset=True))
-        validation = session.validation_for(sprite)
+        if self.settings.creation_only:
+            # Preview readiness is host-owned; this mode never asks the model for tests.
+            validation = await session.validate_pr76_render(RenderValidationInput(
+                component=ComponentDefinition(code=sprite.code, parameter_schema=sprite.parameter_schema, default_parameters=sprite.default_parameters),
+                duration_frames=sprite.composition.duration_frames,
+            ))
+        else:
+            validation = session.validation_for(sprite)
         if validation is None or not validation.passed:
             raise ValueError("Validate the exact final Sprite, defaults and duration with validate.render before completing")
         budget.progress("preparing")
