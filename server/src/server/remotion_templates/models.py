@@ -6,7 +6,7 @@ from datetime import datetime
 from typing import Annotated, Literal, Self
 from uuid import UUID
 
-from .tools.contracts import ImageReference, SpriteDraft
+from .tools.contracts import SpriteDraft
 
 from pydantic import (
     BaseModel,
@@ -50,6 +50,10 @@ class CompositionConfig(Contract):
         return self
 
 
+class ImageReference(Contract):
+    """An uploaded image, resolved and verified by the server rather than by URL."""
+
+    asset_id: UUID
 
 
 class GenerateTemplateRequest(Contract):
@@ -62,11 +66,13 @@ class GenerateTemplateRequest(Contract):
 
     @model_validator(mode="after")
     def require_input(self) -> Self:
-        """Reject empty requests instead of silently generating an arbitrary template."""
+        """Require user input and a fixed 30 FPS for new Agent generations."""
         if self.description is None and self.image is None:
             raise ValueError(
                 "description or image is required; video is not supported yet"
             )
+        if self.composition.fps != 30:
+            raise ValueError("new Remotion generations require 30 FPS")
         return self
 
 
