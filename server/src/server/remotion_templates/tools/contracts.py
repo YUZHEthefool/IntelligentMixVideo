@@ -354,7 +354,12 @@ class CodeValidationReport(ContractModel):
 
 
 class TestScript(ContractModel):
-    """Agent 提交的命名测试，code 内容仍为 TypeScript。"""
+    """Agent 提交的命名测试，code 内容仍为 TypeScript。
+
+    名称以 Test 开头会被 pytest 当作测试类收集，显式关闭收集。
+    """
+
+    __test__ = False
 
     name: NonEmptyString
     code: str
