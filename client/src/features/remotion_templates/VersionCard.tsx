@@ -8,8 +8,10 @@ import {
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
 import { cn } from "@/lib/utils";
-import { exported } from "./api";
-import type { Version } from "./model";
+import { diagnostics as readDiagnostics, exported } from "./api";
+import { publishSprite } from "@/features/sprites/api";
+import { CodeBlock } from "./CodeBlock";
+import type { Diagnostic, Version } from "./model";
 
 /** 每张卡片只拥有本版本的读取与提示，卸载取消请求，不展示未经确认的参数草稿。 */
 export function VersionCard({
@@ -34,7 +36,14 @@ export function VersionCard({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const [publishing, setPublishing] = useState(false);
+  const [publication, setPublication] = useState("");
+  const [items, setItems] = useState<Diagnostic[]>([]);
+  const [diagnosticsNotice, setDiagnosticsNotice] = useState("");
+  const [diagnosticsFailed, setDiagnosticsFailed] = useState(false);
   const request = useRef<Promise<string> | null>(null);
+  const diagnosticRequest = useRef<Promise<void> | null>(null);
+  const [loaded, setLoaded] = useState(false);
   const scope = useRef(new AbortController());
   const copyAllowed = useRef(!disabled);
   copyAllowed.current = !disabled;
@@ -67,6 +76,48 @@ export function VersionCard({
       });
     return request.current;
   }
+  /** 读取服务端隔离类型检查；失败只影响诊断区，代码与复制照常可用。 */
+  async function loadDiagnostics() {
+    if (disabled || diagnosticRequest.current) return;
+    const signal = scope.current.signal;
+    setDiagnosticsNotice("正在检查代码…");
+    setDiagnosticsFailed(false);
+    diagnosticRequest.current = readDiagnostics(version.id, signal)
+      .then((report) => {
+        if (signal.aborted) return;
+        setItems(report.diagnostics);
+        setLoaded(true);
+        // 无诊断时不加提示，避免长期占用卡片空间。
+        setDiagnosticsNotice("");
+      })
+      .catch((reason) => {
+        if (signal.aborted) return;
+        setItems([]);
+        setDiagnosticsFailed(true);
+        setDiagnosticsNotice(
+          reason instanceof Error
+            ? `诊断读取失败：${reason.message} 代码仍可查看。`
+            : "诊断读取失败，代码仍可查看。",
+        );
+      })
+      .finally(() => {
+        diagnosticRequest.current = null;
+      });
+    await diagnosticRequest.current;
+  }
+  /** 显式重试诊断；不重试代码读取，也不改变预览选择。 */
+  function retryDiagnostics() {
+    if (disabled || diagnosticRequest.current) return;
+    diagnosticRequest.current = null;
+    void loadDiagnostics();
+  }
+  /** 展开时同时读取代码与诊断；两者互不阻塞。 */
+  function expand(value: boolean) {
+    setOpen(value);
+    if (!value) return;
+    void load().catch(() => {});
+    void loadDiagnostics();
+  }
   /** 复制固定版本的 Export.tsx；剪贴板失败时展开相同代码供手动复制。 */
   async function copy() {
     if (disabled || loading) return;
@@ -88,13 +139,26 @@ export function VersionCard({
       }
     }
   }
+  /** Copy an accepted version into the immutable Sprite catalog with its verified kind. */
+  async function publish() {
+    if (publishing || version.spec.sprite_kind === "composition") return;
+    setPublishing(true);
+    setPublication("");
+    try {
+      const sprite = await publishSprite(version.id, version.spec.sprite_kind ?? "text");
+      if (!scope.current.signal.aborted)
+        setPublication(`已发布到云端特效资产：${sprite.name}`);
+    } catch (reason) {
+      if (!scope.current.signal.aborted)
+        setPublication(reason instanceof Error ? reason.message : "发布失败，请重试");
+    } finally {
+      if (!scope.current.signal.aborted) setPublishing(false);
+    }
+  }
   return (
     <Collapsible
       open={open}
-      onOpenChange={(value) => {
-        setOpen(value);
-        if (value) void load().catch(() => {});
-      }}
+      onOpenChange={expand}
       className={cn(
         "min-w-0 overflow-hidden rounded-xl border bg-background transition-colors",
         selected ? "border-primary/40 ring-1 ring-primary/10" : "border-border",
@@ -161,7 +225,13 @@ export function VersionCard({
           {notice === "已复制" ? <Check /> : <Copy />}
           {loading ? "读取中…" : "复制代码"}
         </Button>
+        {version.spec.schema_version !== "2" && (!["text", "subtitle"].includes(version.spec.sprite_kind ?? "text") || version.spec.text_layers.length === 1) && (
+          <Button variant="ghost" size="sm" disabled={disabled || publishing} onClick={() => void publish()}>
+            {publishing ? "发布中…" : "发布 Sprite"}
+          </Button>
+        )}
       </div>
+      {publication && <p role="status" className="px-3 pb-2 text-xs text-muted-foreground">{publication}</p>}
       {notice && (
         <p role="status" className="px-3 pb-2 text-xs text-muted-foreground">
           {notice}
@@ -186,13 +256,29 @@ export function VersionCard({
         <div className="border-t px-4 py-2 font-mono text-[11px] text-muted-foreground">
           Export.tsx
         </div>
-        <pre
-          aria-label="模板 TSX 代码"
-          tabIndex={0}
-          className="max-h-72 overflow-auto border-t bg-muted/30 p-4 font-mono text-xs leading-6"
-        >
-          <code>{code || (loading ? "正在读取代码…" : "代码暂不可用")}</code>
-        </pre>
+        {code || acceptedCode ? (
+          <CodeBlock
+            code={code || acceptedCode || ""}
+            diagnostics={
+              loaded ? items : []
+            }
+            fileName="Export.tsx"
+            notice={
+              loading
+                ? "正在读取代码…"
+                : diagnosticsNotice
+            }
+            onRetry={diagnosticsFailed ? retryDiagnostics : undefined}
+          />
+        ) : (
+          <pre
+            aria-label="模板 TSX 代码"
+            tabIndex={0}
+            className="max-h-72 overflow-auto border-t bg-muted/30 p-4 font-mono text-xs leading-6"
+          >
+            <code>{loading ? "正在读取代码…" : "代码暂不可用"}</code>
+          </pre>
+        )}
       </CollapsibleContent>
     </Collapsible>
   );

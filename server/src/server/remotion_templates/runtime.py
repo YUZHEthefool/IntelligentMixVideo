@@ -15,6 +15,11 @@ from .models import DialogueOutput, EditTemplateRequest, JobError, JobInput, Tas
 from .parameters import parameter_changes
 from .provider import Budget, ExecutionFailure, ModelFailure, Provider
 from .store import Conflict, Store
+from .tool_validation import ToolValidator
+from .tools.contracts import CodeValidationReport, ComponentDefinition
+
+
+logger = logging.getLogger("uvicorn.error")
 
 
 class Runtime:
@@ -142,6 +147,11 @@ class Runtime:
         self.notify(result.id, config)
         return result
 
+    async def code_report(self, component: ComponentDefinition) -> CodeValidationReport:
+        """Read-only isolated typecheck for an accepted version; never queues or publishes work."""
+        validator = ToolValidator(self.harness.renderer, self.store.root / "diagnostics")
+        return await validator.code_report(component)
+
     async def cancel(self, job_id: UUID):
         """Persist cancellation first so even a late model result cannot publish a revision."""
         self.client_configs.pop(job_id, None)
@@ -235,7 +245,9 @@ class Runtime:
                     "instruction": inputs.instruction,
                     "parameters": patch,
                     "clarifications": inputs.clarifications,
-                    "accepted_base": base.spec.model_dump() if base else None,
+                    "accepted_base": base.spec.model_dump(mode="json", exclude_unset=True) if base else None,
+                    "current_component": base.candidate.model_dump(mode="json") if base else None,
+                    "reference_images": [settings.tool_asset_base_url.rstrip("/").removesuffix("/tool-assets") + "/assets/" + str(project.request.image.asset_id)] if project.request.image else [],
                 }
                 if patch is None and base and base.source == "user_parameters":
                     baseline = self.store.version(base.agent_base_version_id)
@@ -299,22 +311,37 @@ class Runtime:
             )
             raise
         except (ModelFailure, TimeoutError, ValueError, Conflict) as exc:
+            code = (
+                exc.code
+                if isinstance(exc, ExecutionFailure)
+                else "timeout"
+                if isinstance(exc, TimeoutError)
+                else "execution_failed"
+            )
+            logger.exception(
+                "Remotion job %s failed code=%s data_dir=%s: %s",
+                job_id,
+                code,
+                self.store.job_dir(job_id),
+                str(exc)[:4000] or repr(exc),
+            )
             self.store.update(
                 job_id,
                 status="failed",
                 stage="finished",
                 usage=budget.summary(),
                 error=JobError(
-                    code=exc.code
-                    if isinstance(exc, ExecutionFailure)
-                    else "timeout"
-                    if isinstance(exc, TimeoutError)
-                    else "execution_failed",
+                    code=code,
                     message=str(exc)[:1000] or "Job deadline exceeded.",
                 ),
             )
         except Exception:
-            # Unexpected errors remain sanitized; individual runs cannot break the queue.
+            # Keep the public job sanitized while retaining the traceback in the FastAPI error log.
+            logger.exception(
+                "Remotion job %s failed with an unexpected exception data_dir=%s",
+                job_id,
+                self.store.job_dir(job_id),
+            )
             self.store.update(
                 job_id,
                 status="failed",
