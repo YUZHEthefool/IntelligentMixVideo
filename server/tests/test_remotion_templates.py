@@ -103,7 +103,18 @@ def test_real_creation_flow_builds_preview(tmp_path):
     from server.remotion_templates.harness import Harness
     from server.remotion_templates.renderer import Renderer
 
-    settings = Settings(_env_file=None, data_dir=tmp_path)
+    # The autouse isolation fixture strips IMV_* variables, so read the renderer
+    # locations this run was configured with before building the settings object.
+    configured = {
+        name: Path(value)
+        for name, value in (
+            ("browser_executable", os.environ.get("IMV_BROWSER_EXECUTABLE")),
+            ("font_regular", os.environ.get("IMV_FONT_REGULAR")),
+            ("font_bold", os.environ.get("IMV_FONT_BOLD")),
+        )
+        if value
+    }
+    settings = Settings(_env_file=None, data_dir=tmp_path, **configured)
     renderer = Renderer(settings)
     harness = Harness(SimpleNamespace(settings=settings), renderer)
 

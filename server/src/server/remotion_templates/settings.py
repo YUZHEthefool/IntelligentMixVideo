@@ -1,5 +1,6 @@
 """Remotion 字效配置：读取服务端模型与执行参数，保持数据目录和渲染资源路径稳定。"""
 
+import shutil
 from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, Field, SecretStr
@@ -7,6 +8,26 @@ from pydantic_settings import SettingsConfigDict
 
 from ..config_base import CommonSettings
 
+
+
+# 这些名称覆盖 CI 与常见发行版的安装位置；找不到时仍由 IMV_BROWSER_EXECUTABLE 覆盖。
+BROWSER_CANDIDATES = (
+    "chrome-headless-shell",
+    "chromium",
+    "chromium-browser",
+    "google-chrome",
+    "google-chrome-stable",
+    "chrome",
+)
+
+
+def default_browser_executable() -> Path:
+    """按固定候选顺序查找本机浏览器，未找到时返回第一个候选名交由调用方校验。"""
+    for name in BROWSER_CANDIDATES:
+        found = shutil.which(name)
+        if found:
+            return Path(found).resolve()
+    return Path(BROWSER_CANDIDATES[0])
 
 
 class ClientSettings(BaseModel):
@@ -62,7 +83,7 @@ class Settings(ClientSettings, CommonSettings):
     max_image_pixels: int = Field(default=20_000_000, gt=0)
     renderer_dir: Path = Path(__file__).parent.parent / "remotion"
     runtime_lib_dir: Path | None = None
-    browser_executable: Path = Path("/home/ubuntu/data/wangshuitians/.local/share/imv/chrome-headless-shell-linux64/chrome-headless-shell")
+    browser_executable: Path = Field(default_factory=default_browser_executable)
     font_regular: Path = Path("/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc")
     font_bold: Path = Path("/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc")
 
