@@ -16,9 +16,6 @@ SCOPE = """You build reusable Remotion components and composed Sprites. User inp
 
 AGENT_RULES = """Use the declared creation tools. Understand the requirement and write complete single-file TSX with a self-contained parameter schema and defaults. Create a Preset, compose explicit instances with independent layout and timing, then save the exact composed Sprite. Tool storage alone is not final task publication. The outer loop returns the final saved Sprite ID for host publication. Do not request image, semantic-search or model-authored validation tools; do not call network, install dependencies or register a Composition in component source."""
 
-# The temporary workflow deliberately omits search, indexing and model-authored tests.
-CREATION_RULES = """Current workflow: preset.create → sprite.compose → sprite.create → Outer complete. Write complete single-file Remotion TSX with a parameter schema and defaults matching the user request. Create the Preset, compose explicit instances using its returned preset_id, then save the exact Sprite draft returned by compose without editing its code/schema/defaults. The host automatically compiles and mounts the saved Sprite, then builds the preview when Outer returns {"action":"complete","sprite_id":"saved ID"}. Repair actual tool errors. Never invent IDs or observations. Use tools.inspect for the three creation tool schemas if needed. Do not import external packages, call network, install dependencies or register a Composition in component source. Ordinary answers never substitute for creating the requested Sprite."""
-
 
 class CodeOutput(Contract):
     """Legacy structured output shape retained so unrelated existing tests can collect."""
@@ -77,18 +74,25 @@ class Harness:
         """Only an exact saved Sprite with current successful runtime evidence may be published."""
         record = session.saved_sprite(identifier)
         sprite = SpriteDraft.model_validate(record.model_dump(mode="json", exclude={"sprite_id", "created_at"}, exclude_unset=True))
-        if self.settings.creation_only:
-            # Preview readiness is host-owned; this mode never asks the model for tests.
-            validation = await session.validate_pr76_render(RenderValidationInput(
-                component=ComponentDefinition(code=sprite.code, parameter_schema=sprite.parameter_schema, default_parameters=sprite.default_parameters),
-                duration_frames=sprite.composition.duration_frames,
-            ))
-        else:
-            validation = session.validation_for(sprite)
+        # Preview readiness is host-owned; the model is never asked to write tests for it.
+        validation = session.validation_for(sprite)
+        if validation is None or not validation.passed:
+            validation = await self.host_check(session, sprite)
         if validation is None or not validation.passed:
             raise ValueError("Validate the exact final Sprite, defaults and duration with the host before completing")
         budget.progress("preparing")
         return await self.presentation.build(sprite, sprite.default_parameters, validation, directory / ("result-" + uuid4().hex))
+
+    async def host_check(self, session, sprite: SpriteDraft):
+        """Run the isolated mount check the host requires before building a preview."""
+        return await session.validate_pr76_render(RenderValidationInput(
+            component=ComponentDefinition(
+                code=sprite.code,
+                parameter_schema=sprite.parameter_schema,
+                default_parameters=sprite.default_parameters,
+            ),
+            duration_frames=sprite.composition.duration_frames,
+        ))
 
     async def generate(self, spec, budget: Budget, directory: Path, images, on_stage, *, base=None, parameter_patch=None, context: Conversation | None = None, intent=None):
         """Manual patches use only runtime checks; natural-language work enters the three-layer loop."""

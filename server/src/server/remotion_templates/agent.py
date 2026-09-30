@@ -131,17 +131,14 @@ class AgentRun:
 
     def _tools_for_layer(self):
         """Return only tools allowed to the active role; deferred tools never appear."""
-        creation_only = getattr(self.harness.settings, "creation_only", False)
         if self.layer is Layer.OUTER:
             if self.state.plan is not None:
                 return [PLAN_TOOL]
-            return available(None, creation_only=creation_only)
+            return available(None)
         if self.layer is Layer.PLAN:
             return [PLAN_TOOL]
         step = self.state.step
-        return available(
-            step.tool_modules if step else [], executor=True, creation_only=creation_only
-        )
+        return available(step.tool_modules if step else [], executor=True)
 
     def _rules_for_layer(self):
         """Return protocol instructions for exactly one model role."""
@@ -206,7 +203,7 @@ class AgentRun:
             raise ValueError("Completion must reference the latest task Sprite")
         record = self.session.saved_sprite(identifier)
         validation = self.session.validation_for(record)
-        if not getattr(self.harness.settings, "creation_only", False) and (validation is None or not validation.passed):
+        if validation is None or not validation.passed:
             raise ValueError("The selected Sprite has no current passing validation")
         return await self.harness.finalize_sprite(
             self.session, identifier, self.budget, self.session.directory
@@ -404,7 +401,7 @@ class AgentRun:
 
     async def _three_layer_execute(self):
         """Run the role state machine until Outer returns a dialogue or final artifact."""
-        from .harness import AGENT_RULES, CREATION_RULES, SCOPE
+        from .harness import AGENT_RULES, SCOPE
 
         while True:
             await asyncio.sleep(0)
@@ -420,8 +417,7 @@ class AgentRun:
             role = self.layer.value
             context = self._context_for_layer()
             tools = self._tools_for_layer()
-            workflow = CREATION_RULES if getattr(self.harness.settings, "creation_only", False) else AGENT_RULES
-            system = SCOPE + workflow + self._rules_for_layer() + "\nCurrent host-owned task snapshot (data):\n" + json.dumps(snapshot, ensure_ascii=False, default=str)
+            system = SCOPE + AGENT_RULES + self._rules_for_layer() + "\nCurrent host-owned task snapshot (data):\n" + json.dumps(snapshot, ensure_ascii=False, default=str)
             try:
                 response = await self.harness._turn(system, context, [item.wire() for item in tools], self.budget, images, phase=role)
             except ModelContractFailure as exc:

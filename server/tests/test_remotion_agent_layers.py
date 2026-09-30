@@ -31,6 +31,10 @@ class FakeSession:
         """Resolve only the task's exact saved Sprite."""
         return self.saved_sprites[identifier]
 
+    async def validate_pr76_render(self, _request):
+        """Return a passing mount report so publication can proceed."""
+        return SimpleNamespace(passed=True)
+
     def validation_for(self, _record):
         """Expose a passing final validation for the finalizer test."""
         return SimpleNamespace(passed=True)
@@ -76,12 +80,10 @@ def call(identifier, name, arguments):
     )
 
 
-def test_creation_only_hides_search_and_validation_and_allows_completion(monkeypatch, tmp_path):
-    """Creation mode reaches host publication without model-owned validation receipts."""
+def test_deferred_tools_are_hidden_and_completion_still_publishes(monkeypatch, tmp_path):
+    """Only implemented tools reach the model, and host publication needs no model receipts."""
     monkeypatch.setattr("server.remotion_templates.agent.ToolSession", FakeSession)
-    monkeypatch.setattr(FakeSession, "validation_for", lambda *_: None)
     harness = FakeHarness([AssistantMessage(content='{"action":"complete","sprite_id":"sprite-1"}')])
-    harness.settings.creation_only = True
     run = AgentRun(harness, None, Budget(), tmp_path, [], lambda *_: None)
     names = {tool.name for tool in run._tools_for_layer()}
     assert names == {"preset.create", "sprite.compose", "sprite.create", "tools.inspect", "tools.plan_execute"}

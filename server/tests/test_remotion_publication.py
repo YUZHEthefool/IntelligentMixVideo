@@ -55,14 +55,22 @@ def harness(tmp_path):
     """No secrets or external model clients are loaded by this fixture."""
     font = tmp_path / "font.ttc"
     font.write_bytes(b"fixture-font")
-    settings = Settings(_env_file=None, data_dir=tmp_path / "state", font_regular=font, font_bold=font, creation_only=False)
+    settings = Settings(_env_file=None, data_dir=tmp_path / "state", font_regular=font, font_bold=font, )
     return Harness(SimpleNamespace(settings=settings), OfflinePresentationRenderer(settings))
 
 
 def session_for(sprite, validation):
     """Supply a task-owned saved record and an exact validation lookup to the finalization boundary."""
     record = SpriteRecord(**sprite.model_dump(mode="json", exclude_unset=True), sprite_id="saved", created_at="2026-09-29T00:00:00+00:00")
-    return SimpleNamespace(saved_sprite=lambda identifier: record if identifier == "saved" else None, validation_for=lambda requested: validation if requested == sprite else None)
+    async def host_check(requested):
+        """Stand in for the isolated mount check when no report was recorded earlier."""
+        return validation
+
+    return SimpleNamespace(
+        saved_sprite=lambda identifier: record if identifier == "saved" else None,
+        validation_for=lambda requested: validation if requested == sprite else None,
+        validate_pr76_render=host_check,
+    )
 
 
 def test_finalization_requires_validation_and_seals_exact_sprite(harness, sprite, tmp_path):
@@ -137,9 +145,8 @@ def test_cancellation_wins_over_ready_artifacts(harness, sprite):
     assert store.project(work.id).current_version_id is None
 
 
-def test_creation_only_builds_preview_without_agent_test_scripts(harness, sprite, tmp_path):
+def test_host_builds_preview_without_agent_test_scripts(harness, sprite, tmp_path):
     """The host checks mounting and builds sealed artifacts after a model only saves a Sprite."""
-    harness.settings.creation_only = True
     session = session_for(sprite, None)
     seen = []
 

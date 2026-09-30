@@ -37,8 +37,6 @@ class Settings(ClientSettings, CommonSettings):
     vision_base_url: str | None = None
     vision_api_key: SecretStr | None = None
     data_dir: Path = Path(".data")
-    # Temporary create → compose → save workflow; the host builds and mounts the preview.
-    creation_only: bool = True
     job_timeout_seconds: int = Field(default=600, ge=1, le=3600)
     render_timeout_seconds: int = Field(default=180, ge=1, le=600)
     # Keep usage accounting while temporarily disabling cumulative model quota enforcement.

@@ -225,16 +225,13 @@ class PlanTool:
 
 PLAN_TOOL = PlanTool()
 
-# The focused workflow the model may drive while other implementations are deferred.
-CREATION_TOOLS = {"preset.create", "sprite.compose", "sprite.create", "tools.inspect"}
 
-
-def available(modules=None, *, executor=False, creation_only=False):
+def available(modules=None, *, executor=False):
     """Return the tools the active layer may call.
 
     Deferred tools keep their registered contracts but are withheld from the
-    model while their implementations are absent; `creation_only` narrows the
-    window further to the Preset → Sprite workflow.
+    model while their implementations are absent, so a tool never appears here
+    without a handler that can actually run it.
     """
     tools: list[RegisteredTool | PlanTool] = []
     if not executor and (modules is None or "tools" in modules):
@@ -242,16 +239,14 @@ def available(modules=None, *, executor=False, creation_only=False):
     for item in registered_tools():
         if not item.implemented:
             continue
-        if creation_only and item.name not in CREATION_TOOLS:
-            continue
         if modules is None or item.name == "tools.inspect" or item.name.split(".", 1)[0] in modules:
             tools.append(item)
     return tools
 
 
-def resolve(name: str, modules=None, *, executor=False, creation_only=False):
+def resolve(name: str, modules=None, *, executor=False):
     """Resolve one permitted tool by dotted or provider-wire name."""
-    for item in available(modules, executor=executor, creation_only=creation_only):
+    for item in available(modules, executor=executor):
         if name in {item.name, item.name.replace(".", "_")}:
             return item
     raise ValueError("Unknown or out-of-scope tool")
