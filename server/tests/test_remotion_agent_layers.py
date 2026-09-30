@@ -5,6 +5,8 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 from server.remotion_templates.agent import AgentRun
 from server.remotion_templates.context import AssistantMessage
 from server.remotion_templates.planning import Plan
@@ -36,8 +38,8 @@ class FakeSession:
         return SimpleNamespace(passed=True)
 
     def validation_for(self, _record):
-        """Expose a passing final validation for the finalizer test."""
-        return SimpleNamespace(passed=True)
+        """A saved Sprite has no render receipt until the host finalizer checks it."""
+        return None
 
     async def execute(self, name, args, _catalog):
         """Record one deterministic business tool observation."""
@@ -80,14 +82,19 @@ def call(identifier, name, arguments):
     )
 
 
-def test_deferred_tools_are_hidden_and_completion_still_publishes(monkeypatch, tmp_path):
+@pytest.mark.parametrize("response", [
+    AssistantMessage(content='{"action":"complete","sprite_id":"sprite-1"}'),
+    call("complete-1", "tools_plan_execute", {"action": "complete", "sprite_id": "sprite-1"}),
+], ids=["json", "tool"])
+def test_deferred_tools_are_hidden_and_completion_still_publishes(monkeypatch, tmp_path, response):
     """Only implemented tools reach the model, and host publication needs no model receipts."""
     monkeypatch.setattr("server.remotion_templates.agent.ToolSession", FakeSession)
-    harness = FakeHarness([AssistantMessage(content='{"action":"complete","sprite_id":"sprite-1"}')])
+    harness = FakeHarness([response])
     run = AgentRun(harness, None, Budget(), tmp_path, [], lambda *_: None)
     names = {tool.name for tool in run._tools_for_layer()}
     assert names == {"preset.create", "sprite.compose", "sprite.create", "tools.inspect", "tools.plan_execute"}
     assert asyncio.run(run.plan_execute()) == {"published": "sprite-1"}
+    assert harness.roles == ["outer"]
 
 
 def test_outer_plan_executor_plan_outer_handoff(monkeypatch, tmp_path):

@@ -196,15 +196,12 @@ class AgentRun:
         return self.session.latest_sprite_id
 
     async def _finalize_outer(self, identifier):
-        """Publish only through the host finalizer after Outer selected a Sprite ID."""
+        """Resolve the latest task Sprite; the host finalizer owns render checks and publication."""
         if not identifier:
             raise ValueError("Completion requires a saved Sprite ID")
         if self.session.latest_sprite_id != identifier:
             raise ValueError("Completion must reference the latest task Sprite")
-        record = self.session.saved_sprite(identifier)
-        validation = self.session.validation_for(record)
-        if validation is None or not validation.passed:
-            raise ValueError("The selected Sprite has no current passing validation")
+        self.session.saved_sprite(identifier)
         return await self.harness.finalize_sprite(
             self.session, identifier, self.budget, self.session.directory
         )
