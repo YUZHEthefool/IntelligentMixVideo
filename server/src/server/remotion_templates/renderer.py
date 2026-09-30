@@ -425,6 +425,9 @@ class Renderer:
             "mode": "code",
             "code": candidate.tsx_code,
             "config": candidate.default_config,
+            # 与 validate.code 相同的字段：worker 用它们生成默认参数调用点与 Export.tsx。
+            "default_parameters": candidate.default_config,
+            "parameter_schema": candidate.config_schema,
             "preview_config": preview_values(candidate, spec),
             "subtitle": spec.sprite_kind == "subtitle",
             "composition": spec.composition.model_dump(),

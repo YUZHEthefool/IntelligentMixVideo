@@ -148,6 +148,9 @@ uv run --locked python -m server.remotion_templates.smoke --live
 - `POST /works/{id}/messages` 提问、自然语言修改、参数补丁或回答澄清。
 - `GET /works/{id}/session` 返回一致快照与游标；`GET /works/{id}/stream` 订阅 SSE。
 - `GET /versions/{id}`、`/preview`、`/artifacts/Export.tsx` 读取成功结果。
+- `GET /versions/{id}/diagnostics` 按需在隔离 worker 内重跑 `validate.code` 的类型检查部分，
+  返回契约与 LSP 诊断；先按证据清单校验 `accepted/` 未被修改（改写返回 404），
+  隔离运行时不可用时返回 503，不返回未经检查的「无诊断」结论。只读，不排队也不发布。
 - `POST /jobs/{id}/cancel`、`/retry` 取消或重试；取消先持久化，迟到结果不能发布。
 - `DELETE /works/{id}` 清理会话专属数据，保持共享 Preset/Sprite 库。
 

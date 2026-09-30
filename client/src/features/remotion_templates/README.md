@@ -12,6 +12,11 @@
 旧版本继续显示原画布与扁平控件。PR74 的云端 Sprite 发布协议独立，新的组合版本不显示该发布按钮。
 会话切换、新增、历史预览继续使用保存/放弃/取消保护，取消请求由服务端持久化后停止工作。
 
+展开版本卡片的代码时同时读取 `GET /versions/{id}/diagnostics`：代码按行着色并标注
+error/warning 行，诊断清单点击可跳到对应行。高亮是 `codeHighlight.ts` 的展示用近似分词，
+只影响颜色，不参与验收；真实结论只用服务端隔离类型检查返回的诊断。诊断读取失败时
+代码仍可查看，并提供显式「重试诊断」；未保存参数等禁用状态下不发起诊断请求。
+
 在 `client/` 执行 `bun install --frozen-lockfile`、`bun run test` 和 `bun run build`。
 纯 UI 测试不执行真实模型、Remotion 或浏览器。Linux 行为验证命令见
 [服务端说明](../../../../../server/src/server/remotion_templates/README.md)。

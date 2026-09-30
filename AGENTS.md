@@ -10,6 +10,7 @@
 - `server/` 使用 Python + FastAPI + MySQL，提供模板持久化 API 与 `POST /segmentations` 文案切片接口，首页与用户路由仍为示例、尚未接入用户存储。包内导入使用相对路径，向应用注册 `APIRouter` 实例。
 - 模板模块位于 `server/src/server/template/`，与用户示例目录 `sub_api/` 平级；路由、配置校验、数据库存储与效果目录均放在该模块内。
 - Remotion 文字模板生成服务位于 `server/src/server/remotion_templates/`，Python 包名为 `server.remotion_templates`，挂载 `/api/templates`；本地数据默认保存在该模块的 `.data/`，使用说明维护在模块内 README。
+- 成功版本只读诊断接口复用 `validate.code` 的契约检查与隔离 TypeScript 语言服务，不新增诊断持久化表；先按证据清单校验封存产物（改写返回 404），隔离运行时不可用返回 503，不把「未检查」表示为「无诊断」；只读接口不排队、不发布。
 - PR76 工具契约维护在 `docs/remotion-agent-tool-contracts.md`；图片 info/resize/crop（不含超分辨率）及 Preset/Sprite/validate 的装饰器注册位于 `server/src/server/remotion_templates/tools/`，工具实现遵循该文档第 1081 行的端到端调用顺序；旧 PR74 独立接口保持原语义。
 - Remotion 配置类与加载函数位于 `remotion_templates/settings.py`，通过 `server.remotion_templates.settings` 导入；继续复用 `config_base.CommonSettings` 读取 `server/.env`，相对数据目录和默认 `server/remotion/` 渲染资源位置保持不变。
 - Remotion 新生成采用 Outer → Plan → Executor → Plan → Outer 三层 ReAct，三层有独立有界窗口，只有 Outer 请求最终交付。Plan 负责顺序计划与执行批次，Executor 仅使用当前步骤工具；权限由宿主校验，不能递归唤醒 Plan。普通问答不经过额外评审模型。
@@ -102,6 +103,7 @@
 ## Remotion 字效客户端约定
 
 - 字效客户端位于 `client/src/features/remotion_templates/`，说明维护在该目录 README；复用 `VITE_API_URL`，请求前缀为 `/api/templates`，保留原模板库入口。
+- 成功版本代码卡片展开时读取 `GET /api/templates/versions/{id}/diagnostics`，按行标注 error/warning 并提供可跳转的诊断清单；高亮由 `codeHighlight.ts` 的展示用近似分词产生，只影响阅读颜色，不参与验收、不进入隔离预览。诊断由服务端在隔离 worker 内重跑，读取失败只降级诊断区并提供显式重试，禁用状态下不发起请求。
 - 字效新会话支持生成前选择画布、时长及高级宽高，固定 30 FPS，默认 1080×1920、5 秒；秒数四舍五入到整帧，至少一帧且不超过 30 秒，尺寸遵循服务端边界。首次请求显式携带 composition，非法草稿禁止发送，上传与生成期间锁定；创建后不修改该会话配置，新增恢复默认，历史展示成功版本实际配置，包括旧版本原帧率，不宣称代码已支持任意规格适配。
 - 最左侧历史会话列表顶部提供“新增聊天”，中间聊天，右侧上方预览、下方参数。桌面三栏可拖拽或键盘调宽，本地保存尺寸并提供恢复布局；窄屏使用历史抽屉与聊天/预览切换。成功版本在对应聊天结果下显示默认折叠的代码卡片，可独立复制 Export.tsx、单击预览；参数修订标注来源，失败候选与纯问答不产生版本卡片。历史预览只读，不回滚服务端或改变编辑基线；返回最新才能调参与发送，SSE 新成功版本不抢走明确选中的历史预览，切换旧版本沿用未保存参数的保存/放弃/取消保护。
 - 视频直链仅用于背景，不发送模型、不嵌入字效导出。生成、参数保存检查、预览首帧和背景加载期间，禁用发送、图片变更与参数控件；聊天文字可保留草稿，正常播放不锁定。本地参数草稿实时预览不锁控件、不自动提交；显式保存批量提交净变化，撤销恢复上次成功默认值。未保存时禁止发送、图片变更及复制代码。
