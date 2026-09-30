@@ -2,11 +2,7 @@
 import { useEffect, useRef, useState } from "react";
 import * as api from "./api";
 import { events, StreamReset } from "./events";
-import {
-  defaultComposition,
-  resolveComposition,
-  type CompositionDraft,
-} from "./composition";
+import { defaultComposition } from "./composition";
 import {
   sameValues,
   sameJson,
@@ -22,8 +18,6 @@ import {
 /** 当前视图状态与服务端历史分离，临时参数只在验收成功后成为可复制默认值。 */
 interface Session {
   key: number;
-  compositionDraft: CompositionDraft;
-  spriteKind: "text" | "subtitle" | "filter_overlay" | "video_overlay" | "transition_overlay";
   workId: string | null;
   deleting: boolean;
   messages: ChatMessage[];
@@ -51,8 +45,6 @@ interface Session {
 function blank(key: number): Session {
   return {
     key,
-    compositionDraft: defaultComposition(),
-    spriteKind: "text",
     workId: null,
     deleting: false,
     messages: [],
@@ -471,11 +463,6 @@ export function useTemplateSession(onHistoryChange: () => void) {
       (!text.trim() && !image)
     )
       return;
-    const configuration = resolveComposition(s.compositionDraft);
-    if (!s.workId && configuration.error) {
-      publish({ error: configuration.error });
-      return;
-    }
     publish({
       messages: [
         ...s.messages,
@@ -486,7 +473,7 @@ export function useTemplateSession(onHistoryChange: () => void) {
       if (!s.workId) {
         const asset = image ? await api.upload(image) : undefined;
         if (!current(s.key)) throw new DOMException("Aborted", "AbortError");
-        return (await api.create(text, asset?.id, configuration.composition!, s.spriteKind))
+        return (await api.create(text, asset?.id, defaultComposition()))
           .job;
       }
       return api.message(s.workId, {
@@ -496,18 +483,6 @@ export function useTemplateSession(onHistoryChange: () => void) {
           : { base_version_id: s.version?.id }),
       });
     });
-  }
-  /** 配置只影响尚未创建的会话；同步守卫阻止上传中或切换历史时的迟到修改。 */
-  function configure(compositionDraft: CompositionDraft) {
-    const s = latest.current;
-    if (s.workId || s.busy || s.loading) return;
-    publish({ compositionDraft });
-  }
-  /** Lock the authoring kind once the first message creates a server project. */
-  function configureSpriteKind(spriteKind: Session["spriteKind"]) {
-    const s = latest.current;
-    if (s.workId || s.busy || s.loading) return;
-    publish({ spriteKind });
   }
   /** 尚未验收的参数与成功默认值不同，提交和复制维持锁定。 */
   function dirty() {
@@ -678,8 +653,6 @@ export function useTemplateSession(onHistoryChange: () => void) {
       !!state.version &&
       !sameValues(state.values, state.version.candidate.default_config),
     send,
-    configure,
-    configureSpriteKind,
     change,
     saveParameters,
     discardParameters,
