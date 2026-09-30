@@ -32,7 +32,10 @@ test("新会话显示固定画布并发送默认初始配置", async () => {
     description: "生成标题",
     composition: { width: 1080, height: 1920, fps: 30, duration_in_frames: 150 },
   });
-  expect(screen.getByRole<HTMLButtonElement>("button", { name: "发送" }).disabled).toBe(true);
+  // 创建任务挂起时发送入口被停止替换，图片入口同步锁定，避免重复提交与换图。
+  expect(screen.queryByRole("button", { name: "发送" })).toBeNull();
+  expect(screen.getByRole("button", { name: "停止" })).toBeTruthy();
+  expect(screen.getByRole<HTMLButtonElement>("button", { name: "图片" }).disabled).toBe(true);
 });
 
 // 没有用户输入时不能创建任务；删除可变表单不绕过已有发送条件。
