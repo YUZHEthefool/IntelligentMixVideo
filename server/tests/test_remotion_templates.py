@@ -155,7 +155,7 @@ def test_deferred_tools_stay_out_of_the_model_window():
     assert skipped == []
 
 
-def test_preset_create_persists_through_the_catalog_store(tmp_path):
+def test_mysql_preset_create_persists_through_the_catalog_store(tmp_path):
     """preset.create 经目录存储写入；数据库不可用时仍能在本地目录读回。"""
     async def run():
         """用仅创建模式的会话保存预设，再从同一目录重新读取。"""
