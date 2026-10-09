@@ -1,31 +1,26 @@
-"""Publish accepted Remotion versions as immutable Sprites and validate their template placements.
+"""Publish accepted Remotion versions as immutable assets for the independent Remotion library.
 
 A publication copies the sealed source, parameter contract and interactive player bundle out of the
 chat-owned version directory, so deleting or editing the source work never changes a bound Sprite.
-Records live in the Remotion SQLite database as `imv.sprite.v1.PublishedSprite` JSON; placement
-validation reads them but never mutates one. HTTP framing lives in `sprite_router.py`.
+Records live in the Remotion SQLite database as `imv.sprite.v1.PublishedSprite` JSON; project
+editors read them but never mutate one. HTTP framing lives in `sprite_router.py`.
 """
 
 import hashlib
 import json
 import logging
-import math
 import shutil
 import sqlite3
-from collections.abc import Iterable
 from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
 from fastapi import HTTPException
 from generated.imv.sprite.v1 import sprite_pb2 as pb
 from google.protobuf.json_format import MessageToDict, ParseDict
-from jsonschema import ValidationError
 
 from .evidence import digest, verify_artifacts
 from .store import Conflict, NotFound, Store
-from .tools.schema import validate_parameters
 
-MAX_PLACEMENTS = 100
 PREVIEW_BUNDLE = "interactive.js"
 # 只有包含逐帧同步处理的预览包才能叠加到模板预览上；更早构建的包缺少此标记。
 SYNC_MARKER = b"imv-preview-sync"
@@ -38,18 +33,10 @@ _VERSION_KINDS = {
     "video_overlay": pb.SPRITE_KIND_VIDEO_OVERLAY,
     "transition_overlay": pb.SPRITE_KIND_TRANSITION_OVERLAY,
 }
-# 每种发布类型允许绑定的作用对象。
-_KIND_TARGETS = {
-    pb.SPRITE_KIND_TEXT: {pb.SPRITE_TARGET_TITLE, pb.SPRITE_TARGET_SUBTITLE},
-    pb.SPRITE_KIND_FILTER_OVERLAY: {pb.SPRITE_TARGET_FILTER},
-    pb.SPRITE_KIND_VIDEO_OVERLAY: {
-        pb.SPRITE_TARGET_VIDEO_EFFECT, pb.SPRITE_TARGET_VIDEO_ENTER, pb.SPRITE_TARGET_VIDEO_EXIT,
-    },
-    pb.SPRITE_KIND_TRANSITION_OVERLAY: {pb.SPRITE_TARGET_TRANSITION},
-}
-# 这些作用对象由总线按片段边界触发，必须给出固定时长。
-_DURATION_REQUIRED = {
-    pb.SPRITE_TARGET_TRANSITION, pb.SPRITE_TARGET_VIDEO_ENTER, pb.SPRITE_TARGET_VIDEO_EXIT,
+# 发布内容类型独立于项目中的 IMS 效果目标。
+_PUBLISH_KINDS = {
+    pb.SPRITE_KIND_TEXT, pb.SPRITE_KIND_FILTER_OVERLAY,
+    pb.SPRITE_KIND_VIDEO_OVERLAY, pb.SPRITE_KIND_TRANSITION_OVERLAY,
 }
 
 
@@ -95,17 +82,6 @@ def _lookup(values: dict, path: str):
             return None
         values = values[part]
     return values
-
-
-def _assign(values: dict, path: str, value) -> dict:
-    """Return a copy of nested configuration with one dot path replaced."""
-    result = json.loads(json.dumps(values))
-    *parents, leaf = path.split(".")
-    node = result
-    for part in parents:
-        node = node.setdefault(part, {})
-    node[leaf] = value
-    return result
 
 
 def _parameters(schema: dict, defaults: dict, reserved: set[str]) -> list[pb.SpriteParameter]:
@@ -195,7 +171,7 @@ def preview_script(store: Store, sprite_id: str) -> str:
 
 def _validated_request(request: pb.PublishSpriteRequest, schema: dict, version_kind: str) -> None:
     """Check the declared kind and the text/keyword field names against the sealed schema."""
-    if request.kind not in _KIND_TARGETS:
+    if request.kind not in _PUBLISH_KINDS:
         raise _invalid("kind 必须是文字、滤镜叠加、视频叠加或转场叠加")
     expected = _VERSION_KINDS.get(version_kind)
     if expected is not None and expected != request.kind:
@@ -339,83 +315,3 @@ async def publish(service, request: pb.PublishSpriteRequest) -> pb.SpriteSummary
         shutil.rmtree(directory, ignore_errors=True)
         raise
     return summarize(sprite)
-
-
-def _override_value(parameter: pb.SpriteParameter, override: pb.SpriteParameterOverride):
-    """Return a plain JSON value after checking type, numeric bounds and enumeration against the parameter."""
-    expected = parameter.default_value.WhichOneof("value")
-    if override.value.WhichOneof("value") != expected:
-        raise _invalid(f"参数 {parameter.key} 的覆盖值类型必须与默认值一致")
-    value = getattr(override.value, expected)
-    if expected == "number_value":
-        if not math.isfinite(value):
-            raise _invalid(f"参数 {parameter.key} 必须是有限数字")
-        if parameter.HasField("minimum") and value < parameter.minimum:
-            raise _invalid(f"参数 {parameter.key} 不能小于 {parameter.minimum:g}")
-        if parameter.HasField("maximum") and value > parameter.maximum:
-            raise _invalid(f"参数 {parameter.key} 不能大于 {parameter.maximum:g}")
-    if parameter.allowed_values and not any(
-        item.WhichOneof("value") == expected and getattr(item, expected) == value for item in parameter.allowed_values
-    ):
-        raise _invalid(f"参数 {parameter.key} 的取值不在允许范围内")
-    return value
-
-
-def _validate_placement(sprite: pb.PublishedSprite, placement: pb.SpritePlacement) -> None:
-    """Check target, timing and style overrides of one placement against its publication."""
-    if placement.target not in _KIND_TARGETS.get(sprite.kind, set()):
-        raise _invalid(f"Sprite「{sprite.name}」的类型不支持该作用对象")
-    if placement.target == pb.SPRITE_TARGET_SUBTITLE and not sprite.keywords_prop:
-        raise _invalid(f"Sprite「{sprite.name}」未验收关键词高亮，不能绑定字幕")
-    if placement.start_mode not in {"seconds", "percent"}:
-        raise _invalid("start_mode 只能是 seconds 或 percent")
-    if not math.isfinite(placement.start) or placement.start < 0:
-        raise _invalid("start 必须是不小于 0 的有限数字")
-    if placement.start_mode == "percent" and placement.start >= 100:
-        raise _invalid("百分比起点必须小于 100")
-    if placement.HasField("duration"):
-        if not math.isfinite(placement.duration) or placement.duration <= 0:
-            raise _invalid("duration 必须是大于 0 的有限数字")
-    elif placement.target in _DURATION_REQUIRED:
-        raise _invalid("转场、片段入场和片段出场必须指定 duration")
-    parameters = {item.key: item for item in sprite.parameters}
-    overrides = {}
-    for override in placement.overrides:
-        parameter = parameters.get(override.key)
-        if parameter is None or parameter.access != pb.OPERATOR_ACCESS_VISIBLE_EDITABLE:
-            raise _invalid(f"参数 {override.key} 不存在或不可编辑")
-        if override.key in overrides:
-            raise _invalid(f"参数 {override.key} 重复")
-        overrides[override.key] = _override_value(parameter, override)
-    schema = json.loads(sprite.config_schema_json)
-    configuration = json.loads(sprite.default_config_json)
-    for key, value in overrides.items():
-        if _definition(schema, key).get("type") == "integer":
-            if not float(value).is_integer():
-                raise _invalid(f"参数 {key} 必须是整数")
-            value = int(value)
-        configuration = _assign(configuration, key, value)
-    try:
-        validate_parameters(schema, configuration)
-    except ValidationError as exc:
-        raise _invalid(f"样式覆盖不满足参数约束：{exc.message}") from exc
-
-
-def validate_placements(store: Store, placements: Iterable[pb.SpritePlacement]) -> None:
-    """Reject a binding list that references unknown Sprites or breaks any placement rule."""
-    items = list(placements)
-    if len(items) > MAX_PLACEMENTS:
-        raise _invalid(f"最多绑定 {MAX_PLACEMENTS} 个 Sprite")
-    if sorted(item.order for item in items) != list(range(len(items))):
-        raise _invalid("order 必须从 0 开始连续且不重复")
-    identifiers = [item.id for item in items]
-    if any(not identifier or len(identifier) > 64 for identifier in identifiers) or len(set(identifiers)) != len(items):
-        raise _invalid("绑定实例 id 必须非空、不超过 64 个字符且互不相同")
-    publications: dict[str, pb.PublishedSprite] = {}
-    for item in items:
-        if item.sprite_id not in publications:
-            try:
-                publications[item.sprite_id] = get(store, item.sprite_id)
-            except NotFound:
-                raise _invalid(f"Sprite {item.sprite_id} 不存在") from None
-        _validate_placement(publications[item.sprite_id], item)

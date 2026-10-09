@@ -151,3 +151,10 @@ bun run build
 工作区测试使用真实表单、Radix 选择器和弹窗，覆盖核心编辑与草稿保护。Happy DOM 无法验证真实视频播放和 Tauri 原生行为。
 Happy DOM 的小数 step 校验与浏览器不同，保存流程直接触发表单提交；浏览器原生表单约束仍需浏览器验证。
 Windows 原生资源服务的回归测试位于 `src-tauri/src/localhost.rs`，执行 `cargo test --manifest-path src-tauri/Cargo.toml --lib --locked`，覆盖真实 HTTP 资源响应、查询参数、HEAD、错误主机与方法；原生检查 CI 同步执行。
+
+### 共用视频项目
+
+「视频项目」使用一份母版媒体、画布和时间轴编排 IMS 效果与 Remotion 资产，沿用 IMS 侧的画布尺寸、素材和成片时间规则。
+Remotion 资产由字效成功版本发布，在项目中独立添加；不是 IMS 效果，也不需要先保存 IMS 模板。
+一次「保存项目」原子写入媒体和全部轨道，失败保留草稿；纯 Remotion、纯 IMS 与混合项目均可保存。
+旧 IMS 模板库继续保留，项目目前仅用于编辑预览，未接通成片合成。

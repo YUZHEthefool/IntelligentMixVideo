@@ -5,7 +5,7 @@ from threading import Lock
 from uuid import UUID, uuid4
 
 from fastapi import HTTPException
-from sqlalchemy import JSON, BigInteger, Column, MetaData, String, Table, delete, select
+from sqlalchemy import JSON, Column, MetaData, String, Table, delete, select
 from sqlalchemy.dialects.mysql import DATETIME
 from sqlalchemy.exc import IntegrityError
 
@@ -21,15 +21,6 @@ templates = Table(
     Column("configuration", JSON, nullable=False),
     Column("created_at", DATETIME(fsp=6), nullable=False),
     Column("updated_at", DATETIME(fsp=6), nullable=False, index=True),
-    mysql_charset="utf8mb4",
-)
-# Remotion Sprite 绑定独立保存；整体替换并以 revision 乐观锁防止覆盖他人修改。
-sprite_bindings = Table(
-    "style_sprite_bindings", metadata,
-    Column("style_id", String(36), primary_key=True),
-    Column("revision", BigInteger, nullable=False),
-    Column("placements", JSON, nullable=False),
-    Column("updated_at", DATETIME(fsp=6), nullable=False),
     mysql_charset="utf8mb4",
 )
 _schema_lock = Lock()
@@ -118,47 +109,3 @@ def delete_template(template_id: UUID) -> None:
         ))
         if result.rowcount == 0:
             raise HTTPException(404, "模板不存在")
-        connection.execute(delete(sprite_bindings).where(
-            sprite_bindings.c.style_id == str(template_id),
-        ))
-
-
-def get_sprite_bindings(template_id: UUID) -> tuple[int, list[dict], datetime | None]:
-    """读取模板的 Sprite 绑定；模板存在但无记录时返回版本 0 与空列表，模板不存在返回 404。"""
-    with initialize_schema().connect() as connection:
-        if connection.execute(select(templates.c.template_id).where(
-            templates.c.template_id == str(template_id),
-        )).first() is None:
-            raise HTTPException(404, "模板不存在")
-        row = connection.execute(select(sprite_bindings).where(
-            sprite_bindings.c.style_id == str(template_id),
-        )).first()
-        if row is None:
-            return 0, [], None
-        return row.revision, row.placements, row.updated_at.replace(tzinfo=UTC)
-
-
-def replace_sprite_bindings(
-    template_id: UUID, placements: list[dict], expected_revision: int,
-) -> tuple[int, list[dict], datetime]:
-    """锁定模板行后整体替换绑定；revision 与调用方读取值不同返回 409，成功后递增。"""
-    with initialize_schema().begin() as connection:
-        if connection.execute(select(templates.c.template_id).where(
-            templates.c.template_id == str(template_id),
-        ).with_for_update()).first() is None:
-            raise HTTPException(404, "模板不存在")
-        row = connection.execute(select(sprite_bindings.c.revision).where(
-            sprite_bindings.c.style_id == str(template_id),
-        )).first()
-        current = row.revision if row else 0
-        if current != expected_revision:
-            raise HTTPException(409, "Sprite 绑定已被其他修改更新，请刷新后重试")
-        now = datetime.now(UTC).replace(tzinfo=None)
-        values = {"revision": current + 1, "placements": placements, "updated_at": now}
-        if row is None:
-            connection.execute(sprite_bindings.insert().values(style_id=str(template_id), **values))
-        else:
-            connection.execute(sprite_bindings.update().where(
-                sprite_bindings.c.style_id == str(template_id),
-            ).values(**values))
-    return current + 1, placements, now.replace(tzinfo=UTC)

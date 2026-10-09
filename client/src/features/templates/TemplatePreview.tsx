@@ -1,14 +1,13 @@
 /** SDK 预览组件：管理单个播放器、串行更新时间线，卸载时清理订阅和异步任务。 */
-import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { Maximize2, Pause, Play } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Hint } from "@/components/Hint";
 import { Spinner } from "@/components/ui/spinner";
 import type { Draft, EffectAsset, MasterVideo } from "./model";
 import { loadSDK, loadPreviewFont, readCatalog, type Player } from "./sdk";
-import { buildTimeline, buildPreviewRows, spriteRows, type SpriteClip } from "./timeline";
+import { buildTimeline, buildPreviewRows } from "./timeline";
 import { PreviewTimeline, type PreviewTimelineHandle } from "./PreviewTimeline";
-import { SpriteOverlay, type SpriteOverlayHandle } from "./SpriteOverlay";
 import { previewDuration } from "./tracks";
 import { previewVideoUrl, readMasterVideo } from "./media";
 import { MasterVideoInput } from "./MasterVideoInput";
@@ -20,10 +19,16 @@ interface Props {
   onMediaChange: (media: MasterVideo) => void;
   videoInputKey: string;
   onCatalog: (catalog: EffectAsset[]) => void;
+  /** 项目层可增加独立内容轨道和画面层，所有内容共用本播放器的画布与时钟。 */
+  additionalRows?: ReturnType<typeof buildPreviewRows>;
+  overlay?: ReactNode;
+  onTimeChange?: (time: number) => void;
+  active?: boolean;
+  /** 项目需要保存默认母版实际尺寸，传统 IMS 模板预览仍只在页面持有。 */
+  adoptDefaultMedia?: boolean;
   selectedId?: string | null;
   onSelect?: (id: string) => void;
   onRangeChange?: (id: string, start: number, end: number) => void;
-  sprites?: SpriteClip[];
 }
 
 /** 时间轴标记由三条片段和一条播放指针组成。 */
@@ -32,7 +37,7 @@ function TimelineMark() {
 }
 
 /** 每次修改全量更新时间线并回到开头；串行处理，快速修改只应用最新草稿。 */
-export function TemplatePreview({ draft, media, onMediaChange, videoInputKey, onCatalog, selectedId, onSelect, onRangeChange, sprites = [] }: Props) {
+export function TemplatePreview({ draft, media, onMediaChange, videoInputKey, onCatalog, selectedId, onSelect, onRangeChange, additionalRows, overlay, onTimeChange, active = true, adoptDefaultMedia = false }: Props) {
   const duration = Math.max(0, previewDuration(draft, media));
   const stage = useRef<HTMLDivElement>(null);
   const container = useRef<HTMLDivElement>(null);
@@ -45,9 +50,12 @@ export function TemplatePreview({ draft, media, onMediaChange, videoInputKey, on
   const cancelPlaybackAction = useRef<(() => void) | null>(null);
   const seekAction = useRef<((time: number) => void) | null>(null);
   const track = useRef<PreviewTimelineHandle>(null);
-  const overlay = useRef<SpriteOverlayHandle>(null);
+  const timeCallback = useRef(onTimeChange);
+  timeCallback.current = onTimeChange;
+  const mediaCallback = useRef(onMediaChange);
+  mediaCallback.current = onMediaChange;
   const [rows, setRows] = useState<ReturnType<typeof buildPreviewRows>>([]);
-  const timelineRows = useMemo(() => [...rows, ...spriteRows(sprites)], [rows, sprites]);
+  const combinedRows = useMemo(() => additionalRows ? [...rows, ...additionalRows] : rows, [rows, additionalRows]);
   const [notices, setNotices] = useState<string[]>([]);
   const transition = rows.flatMap((row) => row.actions).find((item) => item.effectId === "transition");
   const [attempt, setAttempt] = useState(0);
@@ -160,7 +168,7 @@ export function TemplatePreview({ draft, media, onMediaChange, videoInputKey, on
           displayedDecisecond = 0;
           setTime(0);
           track.current?.setTime(0);
-          overlay.current?.setTime(0);
+          timeCallback.current?.(0);
           setReady(true);
           setStatus("预览已就绪，点击播放查看效果");
         }
@@ -187,7 +195,10 @@ export function TemplatePreview({ draft, media, onMediaChange, videoInputKey, on
     ])
       .then(async ([source]) => {
         if (disposed || !container.current) return;
-        if (!media) exampleMedia = { ...source, duration: 10 };
+        if (!media) {
+          exampleMedia = { ...source, duration: 10 };
+          if (adoptDefaultMedia) mediaCallback.current(exampleMedia);
+        }
         setCanvas({ width: source.width, height: source.height });
         frame = document.createElement("iframe");
         frame.title = "模板预览播放器";
@@ -252,7 +263,7 @@ export function TemplatePreview({ draft, media, onMediaChange, videoInputKey, on
             if (Math.abs(current - seekTarget) > 0.05) return;
           }
           track.current?.setTime(current);
-          overlay.current?.setTime(current);
+          timeCallback.current?.(current);
           // SDK 仍逐帧驱动播放控制，界面时间最多每 0.1 秒渲染一次。
           const nextDecisecond = Math.min(
             previewDuration(latest.current, latestMedia.current) * 10,
@@ -305,7 +316,7 @@ export function TemplatePreview({ draft, media, onMediaChange, videoInputKey, on
       displayedDecisecond = Math.round(target * 10);
       setTime(target);
       track.current?.setTime(target);
-      overlay.current?.setTime(target);
+      timeCallback.current?.(target);
       setStatus("正在定位播放位置…");
       watchSeek();
       seekFrame = requestAnimationFrame(() => {
@@ -329,19 +340,26 @@ export function TemplatePreview({ draft, media, onMediaChange, videoInputKey, on
       instance?.destroy();
       frame?.remove();
     };
-  }, [attempt, media?.width, media?.height]);
+  }, [attempt, media?.width, media?.height, adoptDefaultMedia]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => apply.current?.(), 250);
     return () => window.clearTimeout(timer);
   }, [draft.tracks, media]);
 
+  useEffect(() => {
+    if (!active) {
+      cancelPlaybackAction.current?.(); player.current?.pause();
+      setStatus((current) => ["正在播放预览…", "正在预览转场…"].includes(current) ? "预览已暂停" : current);
+    }
+  }, [active]);
+
   return <section aria-label="实时预览" className="flex min-h-full min-w-0 flex-col">
     <div className="template-preview-stage border-b px-4 pb-3 pt-4 lg:px-7 lg:pt-5"><div className="mx-auto max-w-[900px]">
       <div className="mb-3 flex items-center justify-between gap-3"><div className="flex items-center gap-2"><span className="template-live-dot size-1.5 rounded-full" aria-hidden="true" /><h2 className="text-[13px] font-semibold">实时预览</h2></div><span className="rounded-md border px-2 py-1 text-[11px] tabular-nums text-muted-foreground">{canvas ? `${canvas.width} × ${canvas.height}` : "正在读取画布尺寸"}</span></div>
       <div ref={stage} className="template-preview-canvas relative mx-auto aspect-video w-full overflow-hidden rounded-lg bg-black" style={canvas ? { aspectRatio: `${canvas.width} / ${canvas.height}`, maxWidth: `${48 * canvas.width / canvas.height}dvh`, "--preview-ratio": canvas.width / canvas.height } as CSSProperties : undefined} aria-label="模板视频预览">
         <div ref={container} className="template-preview-player absolute inset-0 size-full" />
-        {sprites.length > 0 && canvas && <SpriteOverlay ref={overlay} clips={sprites} stageAspect={canvas.width / canvas.height} initialTime={time} />}
+        {overlay}
         {!ready && !failed && <div className="pointer-events-none absolute inset-0 flex items-center justify-center text-white/60"><Spinner className="size-6" /></div>}
         <Hint label="全屏预览"><Button type="button" variant="ghost" size="icon-xs" aria-label="全屏预览" onClick={() => { if (stage.current) void stage.current.requestFullscreen(); }} className="template-preview-fullscreen absolute bottom-2 right-2 rounded-[5px] p-0"><Maximize2 className="size-3" aria-hidden="true" /></Button></Hint>
       </div>
@@ -356,6 +374,6 @@ export function TemplatePreview({ draft, media, onMediaChange, videoInputKey, on
       {failed && <Button type="button" variant="outline" onClick={() => setAttempt((value) => value + 1)}>重试预览</Button>}
       {notices.length > 0 && <ul aria-label="时间调整说明" className="space-y-1 text-xs text-muted-foreground">{notices.map((notice, index) => <li key={index}>{notice}</li>)}</ul>}
     </div></div>
-    <div className="template-preview-timeline flex-1 px-4 pb-5 pt-4 lg:px-7"><div className="mx-auto max-w-[900px]"><div className="mb-3 flex items-center justify-between gap-3"><div className="flex items-center gap-2"><TimelineMark /><h2 className="text-[13px] font-semibold">时间轴</h2>{transition && <Button type="button" variant="ghost" size="sm" disabled={!ready || seeking} onClick={() => playAction.current?.(Math.max(0, transition.start - 1), Math.min(duration, transition.end + 1))} className="template-preview-transition h-7 px-2 text-[11px]">预览转场</Button>}</div><div className="flex items-center gap-3 text-[11px] tabular-nums text-muted-foreground"><span className="font-semibold text-foreground">{time.toFixed(1)} / {duration.toFixed(1)} 秒</span><span>{draft.tracks.length} 个对象</span></div></div><PreviewTimeline ref={track} rows={timelineRows} disabled={!ready} time={time} duration={duration} selectedId={selectedId} onSelect={onSelect} onRangeChange={onRangeChange} onSeek={(value) => seekAction.current?.(value)} /></div></div>
+    <div className="template-preview-timeline flex-1 px-4 pb-5 pt-4 lg:px-7"><div className="mx-auto max-w-[900px]"><div className="mb-3 flex items-center justify-between gap-3"><div className="flex items-center gap-2"><TimelineMark /><h2 className="text-[13px] font-semibold">时间轴</h2>{transition && <Button type="button" variant="ghost" size="sm" disabled={!ready || seeking} onClick={() => playAction.current?.(Math.max(0, transition.start - 1), Math.min(duration, transition.end + 1))} className="template-preview-transition h-7 px-2 text-[11px]">预览转场</Button>}</div><div className="flex items-center gap-3 text-[11px] tabular-nums text-muted-foreground"><span className="font-semibold text-foreground">{time.toFixed(1)} / {duration.toFixed(1)} 秒</span><span>{draft.tracks.length + (additionalRows?.length ?? 0)} 个对象</span></div></div><PreviewTimeline ref={track} rows={combinedRows} disabled={!ready} time={time} duration={duration} selectedId={selectedId} onSelect={onSelect} onRangeChange={onRangeChange} onSeek={(value) => seekAction.current?.(value)} /></div></div>
   </section>;
 }

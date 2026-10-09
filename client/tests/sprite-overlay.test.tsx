@@ -2,7 +2,7 @@
 import { expect, spyOn, test } from "bun:test";
 import { act, render, screen, waitFor } from "@testing-library/react";
 import { createRef } from "react";
-import { SpriteOverlay, type SpriteOverlayHandle } from "@/features/templates/SpriteOverlay";
+import { SpriteOverlay, type SpriteOverlayHandle } from "@/features/sprites/SpriteOverlay";
 
 const clip = { id: "sprite-a", spriteId: "s1", aspect: 9 / 16, name: "霓虹标题", start: 1, end: 4 };
 
@@ -21,7 +21,7 @@ function mount() {
   return { frame, post, channel, ready, setTime };
 }
 
-// 场景：播放器指向资产的透明同步预览页，按 IMS 的 Cover 方式铺满：竖屏资产在横屏画面里取全宽、上下裁切。
+// 场景：播放器指向资产的透明同步预览页，按 Cover 方式铺满：竖屏资产在横屏画面里取全宽、上下裁切。
 test("叠加播放器使用透明同步页并按画面比例铺满", () => {
   const { frame, channel } = mount();
   expect(frame.getAttribute("sandbox")).toBe("allow-scripts");
@@ -69,4 +69,29 @@ test("卸载取消待处理帧后重新挂载仍能定位", async () => {
   await again.ready(true);
   await again.setTime(2);
   expect(again.frame.style.visibility).toBe("visible");
+});
+
+// 回归：先挂载空画布，再增删资产，已有 iframe 地址保持稳定，所有同步消息使用当前通道。
+test("增删资产后每个播放器继续使用稳定通道同步", async () => {
+  const ref = createRef<SpriteOverlayHandle>();
+  const view = render(<SpriteOverlay ref={ref} clips={[]} stageAspect={1} initialTime={2} />);
+  const second = { ...clip, id: "sprite-b", spriteId: "s2", name: "第二个资产" };
+  view.rerender(<SpriteOverlay ref={ref} clips={[clip]} stageAspect={1} initialTime={2} />);
+  const first = screen.getByTitle<HTMLIFrameElement>("Remotion 资产预览：霓虹标题");
+  const originalSrc = first.src;
+  view.rerender(<SpriteOverlay ref={ref} clips={[clip, second]} stageAspect={1} initialTime={2} />);
+  expect(first.src).toBe(originalSrc);
+  const other = screen.getByTitle<HTMLIFrameElement>("Remotion 资产预览：第二个资产");
+  const frames = [first, other];
+  const posts = frames.map((frame) => spyOn(frame.contentWindow!, "postMessage"));
+  for (const frame of frames) await act(async () => {
+    window.dispatchEvent(new MessageEvent("message", { source: frame.contentWindow, data: { type: "imv-preview-ready", channel: new URL(frame.src).hash.slice(1), sync: true } }));
+  });
+  await act(async () => { ref.current!.setTime(3); await new Promise((resolve) => requestAnimationFrame(resolve)); });
+  frames.forEach((frame, index) => expect(posts[index]).toHaveBeenLastCalledWith({ type: "imv-preview-sync", channel: new URL(frame.src).hash.slice(1), time: 2 }, "*"));
+  const otherSrc = other.src;
+  view.rerender(<SpriteOverlay ref={ref} clips={[second]} stageAspect={1} initialTime={2} />);
+  expect(other.src).toBe(otherSrc);
+  await act(async () => { ref.current!.setTime(2); await new Promise((resolve) => requestAnimationFrame(resolve)); });
+  expect(posts[1]).toHaveBeenLastCalledWith({ type: "imv-preview-sync", channel: new URL(other.src).hash.slice(1), time: 1 }, "*");
 });

@@ -1,21 +1,13 @@
-"""Protobuf HTTP routes for the Sprite asset catalog and cloud-template bindings under /api/sprites.
-
-The router belongs to the main app (the Remotion app is mounted at /api/templates) and borrows the
-Remotion runtime for its published-Sprite store; bindings are persisted by the cloud template store.
-Request and response bodies are `imv.sprite.v1` messages, mirroring the template router's framing.
-"""
+"""Remotion asset publication, catalog and sandboxed preview routes; project saves live in projects.router."""
 
 from typing import Annotated
-from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.responses import FileResponse, HTMLResponse
 from generated.imv.sprite.v1 import sprite_pb2 as pb
-from google.protobuf.json_format import MessageToDict, ParseDict
 from google.protobuf.message import DecodeError, Message
 from starlette.concurrency import run_in_threadpool
 
-from ..template import store as templates
 from . import sprites
 from .api import app as remotion_templates_app
 from .routes import player_page, runtime_for
@@ -51,21 +43,9 @@ async def _body(request: Request, message: Message) -> None:
         raise HTTPException(400, "Protobuf 请求内容无效") from exc
 
 
-def _bindings_message(
-    style_id: UUID, revision: int, placements: list[dict], updated_at,
-) -> pb.StyleSpriteBindings:
-    """Rebuild the stored binding record as its wire message; no record is revision 0 and empty."""
-    message = pb.StyleSpriteBindings(style_id=str(style_id), revision=revision)
-    for item in placements:
-        ParseDict(item, message.placements.add())
-    if updated_at is not None:
-        message.updated_at.FromDatetime(updated_at)
-    return message
-
-
 @router.get("", response_class=Response, responses={200: {"content": PROTOBUF_CONTENT}}, summary="查询已发布的 Sprite 目录")
 async def list_sprites(service: Service) -> Response:
-    """返回可供模板绑定的不可变发布条目，不包含 TSX 源码。"""
+    """返回可供项目添加的不可变发布条目，不包含 TSX 源码。"""
     items = await run_in_threadpool(sprites.catalog, service.store)
     return _response(pb.ListSpritesResponse(sprites=items))
 
@@ -82,45 +62,11 @@ async def publish_sprite(request: Request, service: Service) -> Response:
     return _response(pb.PublishSpriteResponse(sprite=summary))
 
 
-@router.get(
-    "/styles/{style_id}", response_class=Response,
-    responses={200: {"content": PROTOBUF_CONTENT}}, summary="读取云端模板的 Sprite 绑定",
-)
-async def get_style_sprites(style_id: UUID) -> Response:
-    """模板存在但从未保存绑定时返回空列表和版本 0；模板不存在返回 404。"""
-    revision, placements, updated_at = await run_in_threadpool(templates.get_sprite_bindings, style_id)
-    return _response(pb.GetStyleSpritesResponse(
-        bindings=_bindings_message(style_id, revision, placements, updated_at),
-    ))
-
-
-@router.post(
-    "/styles/{style_id}", response_class=Response, openapi_extra=_REQUEST_BODY,
-    responses={200: {"content": PROTOBUF_CONTENT}}, summary="整体替换云端模板的 Sprite 绑定",
-)
-async def save_style_sprites(style_id: UUID, request: Request, service: Service) -> Response:
-    """校验类型、时间与样式覆盖后整体替换；expected_revision 过期返回 409。"""
-    message = pb.SaveStyleSpritesRequest()
-    await _body(request, message)
-    if message.style_id != str(style_id):
-        raise HTTPException(422, "请求体 style_id 必须与路径一致")
-    await run_in_threadpool(sprites.validate_placements, service.store, message.placements)
-    placements = [
-        MessageToDict(item, preserving_proto_field_name=True) for item in message.placements
-    ]
-    revision, saved, updated_at = await run_in_threadpool(
-        templates.replace_sprite_bindings, style_id, placements, message.expected_revision,
-    )
-    return _response(pb.SaveStyleSpritesResponse(
-        bindings=_bindings_message(style_id, revision, saved, updated_at),
-    ))
-
-
 @router.get("/{sprite_id}/preview", response_class=HTMLResponse, summary="打开已发布 Sprite 的交互预览")
 async def sprite_preview(sprite_id: str, service: Service, overlay: bool = False) -> HTMLResponse:
     """返回发布时复制的隔离播放器页面，不依赖源聊天仍然存在。
 
-    `overlay=true` 使用透明背景，供模板编辑把资产叠在预览画面上；再加页面参数 `sync=1`
+    `overlay=true` 使用透明背景，供项目编辑把资产叠在共用预览画面上；再加页面参数 `sync=1`
     （新生成的资产支持）即由父页面通过消息逐帧驱动，无控制条和循环。
     """
     script = await run_in_threadpool(sprites.preview_script, service.store, sprite_id)

@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { SettingsDialog } from "@/features/settings/SettingsDialog";
 import { TemplateWorkspace } from "@/features/templates/TemplateWorkspace";
 import { TemplateHome, type TemplateSelection } from "@/features/templates/TemplateHome";
+import { ProjectWorkspace } from "@/features/projects/ProjectWorkspace";
 import { RemotionWorkspace } from "@/features/remotion_templates/RemotionWorkspace";
 import { Tabs as TabsPrimitive } from "radix-ui";
 import { TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -16,6 +17,7 @@ import { cn } from "@/lib/utils";
 const navigation = [
   { value: "home", label: "主页", icon: House },
   { value: "library", label: "模版编辑", icon: SquarePen },
+  { value: "projects", label: "视频项目", icon: Film },
   { value: "remotion", label: "Remotion 字效", icon: Sparkles },
 ];
 
@@ -24,6 +26,7 @@ export default function HomePage() {
   const [workspace, setWorkspace] = useState("home");
   const [libraryOpened, setLibraryOpened] = useState(false);
   const [remotionOpened, setRemotionOpened] = useState(false);
+  const [projectsOpened, setProjectsOpened] = useState(false);
   const [selection, setSelection] = useState<TemplateSelection | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   // 侧栏收起只调整导航宽度，工作区继续保留当前编辑状态。
@@ -37,6 +40,7 @@ export default function HomePage() {
         // 模板库首次访问才加载 SDK；之后切换不卸载未保存的编辑状态。
         if (value === "library") setLibraryOpened(true);
         if (value === "remotion") setRemotionOpened(true);
+        if (value === "projects") setProjectsOpened(true);
         setWorkspace(value);
       }}
       className="flex min-h-dvh gap-0"
@@ -122,6 +126,9 @@ export default function HomePage() {
           </TabsContent>
           <TabsContent value="library" forceMount hidden={workspace !== "library"}>
             {libraryOpened && <TemplateWorkspace selection={selection} onHome={() => setWorkspace("home")} />}
+          </TabsContent>
+          <TabsContent value="projects" forceMount hidden={workspace !== "projects"}>
+            {projectsOpened && <ProjectWorkspace active={workspace === "projects"} />}
           </TabsContent>
           <TabsContent value="remotion" forceMount hidden={workspace !== "remotion"}>
             {remotionOpened && <RemotionWorkspace />}

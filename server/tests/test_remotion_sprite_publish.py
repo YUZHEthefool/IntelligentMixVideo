@@ -1,4 +1,4 @@
-"""Remotion 字效保存为 Sprite 资产：发布、目录、预览与云端模板绑定的真实 SQLite/文件/HTTP 回归。
+"""Remotion 字效保存为 Sprite 资产：发布、目录与独立资产预览的真实 SQLite/文件/HTTP 回归。
 
 不访问模型、浏览器或 MySQL（模板库使用 conftest 的临时 SQLite）；发布版本由离线渲染替身落盘。
 在 server/ 目录执行 `uv run --locked pytest tests/test_remotion_sprite_publish.py -v`。
@@ -12,7 +12,6 @@ from types import SimpleNamespace
 import pytest
 from fastapi.testclient import TestClient
 from generated.imv.sprite.v1 import sprite_pb2 as pb
-from sqlalchemy import Engine, select
 
 from server.app import app
 from server.remotion_templates.harness import Harness
@@ -22,9 +21,7 @@ from server.remotion_templates.settings import Settings
 from server.remotion_templates.sprite_router import sprite_runtime
 from server.remotion_templates.store import Store
 from server.remotion_templates.tools.contracts import SpriteDraft
-from server.template import store as template_store
 
-from .conftest import template_track
 from .test_remotion_version_diagnostics import (
     CodeOnlyRenderer,
     OfflineRenderer,
@@ -152,35 +149,6 @@ def published_sprite(client: TestClient, version_id, **fields) -> pb.SpriteSumma
     return pb.PublishSpriteResponse.FromString(response.content).sprite
 
 
-def placement(sprite_id: str, **fields) -> pb.SpritePlacement:
-    """默认在成片开头绑定标题；用例按需覆盖字段。"""
-    values = {"id": "p1", "target": pb.SPRITE_TARGET_TITLE, "start_mode": "seconds", "start": 0, "order": 0, **fields}
-    return pb.SpritePlacement(sprite_id=sprite_id, **values)
-
-
-def save_bindings(client: TestClient, style_id: str, placements: list, expected_revision: int = 0, body_style_id: str | None = None):
-    """整体替换模板的 Sprite 绑定。"""
-    request = pb.SaveStyleSpritesRequest(
-        style_id=body_style_id or style_id, placements=placements, expected_revision=expected_revision,
-    )
-    return client.post(f"/api/sprites/styles/{style_id}", content=request.SerializeToString(), headers=PROTOBUF)
-
-
-def bindings(response) -> pb.StyleSpriteBindings:
-    """解码绑定读取/保存响应。"""
-    return pb.GetStyleSpritesResponse.FromString(response.content).bindings
-
-
-def create_style(client: TestClient, template_payload: dict) -> str:
-    """创建云端模板并返回其 ID。"""
-    from generated.imv.template.v1 import template_pb2 as template_pb
-    from .template_wire import post_template
-
-    response = post_template(client, template_payload)
-    assert response.status_code == 201
-    return template_pb.SaveTemplateResponse.FromString(response.content).template.template_id
-
-
 def test_publish_copies_content_and_lists_summary_without_source(client: TestClient, published) -> None:
     """发布后目录只含摘要与可编辑参数；文字与关键词字段归总线，不进入参数。"""
     summary = published_sprite(client, published.version.id)
@@ -250,112 +218,13 @@ def test_publish_rejects_unknown_malformed_or_tampered_sources(client: TestClien
     assert client.post("/api/sprites/publish", content=b"\xff\xff", headers=PROTOBUF).status_code == 400
 
 
-def test_style_bindings_roundtrip_with_revision_lock(client: TestClient, published, template_payload) -> None:
-    """未保存时为版本 0；保存递增 revision，过期 revision 返回 409 且不改动已存绑定。"""
-    sprite = published_sprite(client, published.version.id)
-    style_id = create_style(client, template_payload)
-    empty = client.get(f"/api/sprites/styles/{style_id}")
-    assert (bindings(empty).revision, list(bindings(empty).placements)) == (0, [])
-
-    override = pb.SpriteParameterOverride(key="size", value=pb.ScalarValue(number_value=88))
-    first = save_bindings(client, style_id, [
-        placement(sprite.sprite_id, overrides=[override]),
-        placement(sprite.sprite_id, id="p2", target=pb.SPRITE_TARGET_SUBTITLE, start_mode="percent", start=50, order=1, duration=2),
-    ])
-    assert first.status_code == 200
-    saved = bindings(first)
-    assert saved.revision == 1 and [item.id for item in saved.placements] == ["p1", "p2"]
-    assert saved.placements[0].overrides[0].value.number_value == 88
-    assert saved.placements[1].duration == 2 and not saved.placements[0].HasField("duration")
-
-    stale = save_bindings(client, style_id, [], expected_revision=0)
-    assert stale.status_code == 409
-    again = bindings(client.get(f"/api/sprites/styles/{style_id}"))
-    assert again.revision == 1 and len(again.placements) == 2
-    cleared = bindings(save_bindings(client, style_id, [], expected_revision=1))
-    assert cleared.revision == 2 and list(cleared.placements) == []
-
-
-@pytest.mark.parametrize("build", [
-    lambda sid: [placement(sid, target=pb.SPRITE_TARGET_FILTER)],
-    lambda sid: [placement(sid, target=pb.SPRITE_TARGET_UNSPECIFIED)],
-    lambda sid: [placement(sid, start_mode="frames")],
-    lambda sid: [placement(sid, start_mode="percent", start=100)],
-    lambda sid: [placement(sid, start=-1)],
-    lambda sid: [placement(sid, duration=0)],
-    lambda sid: [placement(sid, order=1)],
-    lambda sid: [placement(sid), placement(sid, order=1)],
-    lambda sid: [placement(sid, overrides=[pb.SpriteParameterOverride(key="text", value=pb.ScalarValue(string_value="x"))])],
-    lambda sid: [placement(sid, overrides=[pb.SpriteParameterOverride(key="size", value=pb.ScalarValue(string_value="big"))])],
-    lambda sid: [placement(sid, overrides=[pb.SpriteParameterOverride(key="size", value=pb.ScalarValue(number_value=500))])],
-    lambda sid: [placement(sid, overrides=[pb.SpriteParameterOverride(key="weight", value=pb.ScalarValue(number_value=500))])],
-    lambda sid: [placement(sid, overrides=[pb.SpriteParameterOverride(key="weight", value=pb.ScalarValue(number_value=400.5))])],
-    lambda sid: [placement("00000000-0000-4000-8000-000000000000")],
-], ids=[
-    "wrong-target", "unspecified-target", "bad-start-mode", "percent-100", "negative-start", "zero-duration",
-    "order-gap", "duplicate-id", "bus-owned-override", "wrong-type", "above-maximum", "outside-enum",
-    "fractional-integer", "unknown-sprite",
-])
-def test_invalid_placements_are_rejected_without_saving(client: TestClient, published, template_payload, build) -> None:
-    """目标、时间、顺序与样式覆盖任一违规都返回 422，且不产生绑定记录。"""
-    sprite = published_sprite(client, published.version.id)
-    style_id = create_style(client, template_payload)
-    assert save_bindings(client, style_id, build(sprite.sprite_id)).status_code == 422
-    assert bindings(client.get(f"/api/sprites/styles/{style_id}")).revision == 0
-
-
-def test_boundary_targets_need_duration_and_subtitle_needs_keywords(client: TestClient, published, template_payload) -> None:
-    """视觉 Sprite 的入场必须指定时长；未验收关键词高亮的文字 Sprite 不能绑定字幕。"""
-    visual = published_sprite(client, published.version.id, kind=pb.SPRITE_KIND_VIDEO_OVERLAY, text_prop="", keywords_prop="")
-    plain_text = published_sprite(client, published.version.id, keywords_prop="")
-    style_id = create_style(client, template_payload)
-    enter = placement(visual.sprite_id, target=pb.SPRITE_TARGET_VIDEO_ENTER)
-    assert save_bindings(client, style_id, [enter]).status_code == 422
-    enter.duration = 1.5
-    assert save_bindings(client, style_id, [enter]).status_code == 200
-    subtitle = placement(plain_text.sprite_id, target=pb.SPRITE_TARGET_SUBTITLE)
-    assert save_bindings(client, style_id, [subtitle], expected_revision=1).status_code == 422
-
-
-def test_binding_routes_reject_unknown_styles_and_mismatched_bodies(client: TestClient, published, template_payload) -> None:
-    """模板不存在返回 404；请求体 style_id 与路径不一致返回 422。"""
-    sprite = published_sprite(client, published.version.id)
-    missing = "00000000-0000-4000-8000-000000000000"
-    assert client.get(f"/api/sprites/styles/{missing}").status_code == 404
-    assert save_bindings(client, missing, [placement(sprite.sprite_id)]).status_code == 404
-    style_id = create_style(client, template_payload)
-    assert save_bindings(client, style_id, [], body_style_id=missing).status_code == 422
-    assert client.post(f"/api/sprites/styles/{style_id}", json={}).status_code == 415
-
-
-def test_deleting_a_template_removes_its_bindings(client: TestClient, template_db: Engine, published, template_payload) -> None:
-    """删除云端模板同一事务清除其绑定，但保留已发布 Sprite 资产。"""
-    sprite = published_sprite(client, published.version.id)
-    style_id = create_style(client, template_payload)
-    assert save_bindings(client, style_id, [placement(sprite.sprite_id)]).status_code == 200
-    assert client.delete(f"/template/{style_id}").status_code == 204
-    with template_db.connect() as connection:
-        assert connection.execute(select(template_store.sprite_bindings)).all() == []
-    assert len(pb.ListSpritesResponse.FromString(client.get("/api/sprites").content).sprites) == 1
-
-
-def test_nested_parameters_publish_with_dot_paths_and_validate_overrides(client: TestClient, nested_published, template_payload) -> None:
-    """组合 Sprite 的业务文字在嵌套对象里：用点号路径发布，文字字段不入参数，覆盖按嵌套值校验。"""
+def test_nested_parameters_publish_with_dot_paths(client: TestClient, nested_published) -> None:
+    """组合 Sprite 的业务文字在嵌套对象里：用点号路径发布，文字字段不入样式参数。"""
     summary = published_sprite(client, nested_published.version.id, text_prop="title_main.title", keywords_prop="")
     assert {item.key for item in summary.parameters} == {"title_main.fontSize", "title_main.textColor"}
     size = next(item for item in summary.parameters if item.key == "title_main.fontSize")
     assert (size.minimum, size.maximum, size.default_value.number_value) == (8, 500, 160)
 
-    style_id = create_style(client, template_payload)
-    ok = pb.SpriteParameterOverride(key="title_main.fontSize", value=pb.ScalarValue(number_value=200))
-    assert save_bindings(client, style_id, [placement(summary.sprite_id, overrides=[ok])]).status_code == 200
-    for key, value in [
-        ("title_main.fontSize", pb.ScalarValue(number_value=900)),
-        ("title_main.title", pb.ScalarValue(string_value="x")),
-        ("title_main", pb.ScalarValue(string_value="x")),
-    ]:
-        bad = pb.SpriteParameterOverride(key=key, value=value)
-        assert save_bindings(client, style_id, [placement(summary.sprite_id, overrides=[bad])], expected_revision=1).status_code == 422
 
 
 @pytest.mark.parametrize("text_prop", ["title", "title_main", "title_main.missing", "title_main.fontSize"], ids=["flat-name-of-nested", "object", "unknown-path", "non-string"])
