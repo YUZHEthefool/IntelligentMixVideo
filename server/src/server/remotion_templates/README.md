@@ -106,6 +106,30 @@ terminal job accepts no further rounds. Unknown tool names become `unknown`;
 model protocol failures are explicitly marked. Snapshots carry all rounds, while
 `job.updated` omits that history and clients retain already received deltas.
 
+## Sprite assets
+
+`POST /api/sprites/publish` copies an accepted version into an immutable
+`imv.sprite.v1.PublishedSprite` (SQLite `sprites` table plus `sprites/<id>/interactive.js`),
+so deleting or editing the source work never changes a published Sprite.
+Publishing re-verifies the sealed `accepted/` artifacts (409 when changed), requires the
+declared kind to match a version-fixed kind (composition versions choose it), and for text
+Sprites requires `text_prop` to be a string parameter. Parameters are addressed by dot path
+(`title_main.title`), so composed Sprites with nested objects work. Scalar leaves at any depth become
+`VISIBLE_EDITABLE` controls; text and keyword fields stay with the composition bus. The same
+source and field choice returns the original Sprite. `animation_frames` and `static_frame` stay 0
+because composition versions carry no such evidence, and `preview_url` serves the sealed
+interactive player page rather than an MP4.
+
+`GET /api/sprites` lists summaries (no TSX). `GET/POST /api/sprites/styles/{style_id}` read and
+replace a cloud template's bindings in MySQL (`style_sprite_bindings`, deleted with the template)
+with an `expected_revision` lock (409). Saving validates target/kind pairs, timing, order, and
+overrides against the published parameter contract and JSON Schema. The router lives in
+`sprite_router.py` on the main app and borrows the Remotion runtime; `/api/sprites/render` is not implemented.
+`GET /api/sprites/{id}/preview?overlay=true&sync=1` serves the sealed player on a transparent page for the template editor;
+a sync-mode bundle has no controls or loop and seeks on `imv-preview-sync {time}` messages, reporting `sync: true` in its
+ready message. Publishing rebuilds the bundle from the sealed source in the isolated worker when the sealed one lacks
+the marker (and refreshes an existing publication on re-save); a failed rebuild still saves the asset, just without overlay preview.
+
 ## Code diagnostics
 
 `GET /api/templates/versions/{id}/diagnostics` re-runs the isolated TypeScript
