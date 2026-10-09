@@ -202,7 +202,8 @@ PowerShell 先执行 `$env:RELEASE_TAG = "v0.3.0"`，再运行同一条 `bun ...
 目前只接受正式版本（不含 `-beta` / `-rc`），且版本须满足 Windows MSI 的数值限制。
 正式构建仍使用上述未签名安装包配置，代码签名和 macOS 公证需另行接入。
 
-### Remotion 资产发布
+### 视频项目与 Remotion 资产
 
-字效成功版本可一键「保存到资产」。服务端独立保存已验收的源码、参数和交互预览，删除源聊天不会删除资产；重复保存返回原资产。
-目录与预览接口见 [Remotion 服务说明](server/src/server/remotion_templates/README.md)。
+字效成功版本可保存为独立 Remotion 资产。「视频项目」提供共用的媒体、画布和时间轴，分别编排 IMS 效果与 Remotion 片段，整体保存到项目库。
+项目不依赖旧 IMS 模板 ID，只有 Remotion 资产也可以保存。当前支持编辑预览，尚未接通成片合成。
+接口与存储约定见 [Remotion 服务说明](server/src/server/remotion_templates/README.md)。
