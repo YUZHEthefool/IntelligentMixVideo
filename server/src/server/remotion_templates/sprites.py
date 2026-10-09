@@ -2,13 +2,11 @@
 
 A publication copies the sealed source, parameter contract and interactive player bundle out of the
 chat-owned version directory, so deleting or editing the source work never changes a bound Sprite.
-Records live in the Remotion SQLite database as `imv.sprite.v1.PublishedSprite` JSON; project
-editors read them but never mutate one. HTTP framing lives in `sprite_router.py`.
+Records live in the Remotion SQLite database as `imv.sprite.v1.PublishedSprite` JSON; reads never mutate a publication. HTTP framing lives in `sprite_router.py`.
 """
 
 import hashlib
 import json
-import logging
 import shutil
 import sqlite3
 from datetime import UTC, datetime
@@ -22,8 +20,6 @@ from .evidence import digest, verify_artifacts
 from .store import Conflict, NotFound, Store
 
 PREVIEW_BUNDLE = "interactive.js"
-# 只有包含逐帧同步处理的预览包才能叠加到模板预览上；更早构建的包缺少此标记。
-SYNC_MARKER = b"imv-preview-sync"
 
 # 版本创建时的内容类型与发布类型的对应；composition 版本不固定类型，由发布请求选择。
 _VERSION_KINDS = {
@@ -190,48 +186,8 @@ def _validated_request(request: pb.PublishSpriteRequest, schema: dict, version_k
         raise _invalid("只有文字 Sprite 可以声明 text_prop 与 keywords_prop")
 
 
-async def _rebuild_bundle(service, version) -> bytes | None:
-    """Rebuild the player bundle from the sealed source with the current host code; None when unavailable.
-
-    Failure is non-fatal: the asset is still saved with its original bundle and simply cannot be previewed
-    over the template.
-    """
-    store = service.store
-    work = store.root / "sprites" / f".build-{uuid4()}"
-    try:
-        work.mkdir(parents=True)
-        (work / "request.json").write_text(json.dumps({
-            "code": version.candidate.tsx_code,
-            "config": version.candidate.default_config,
-            "composition": version.spec.composition.model_dump(),
-        }, ensure_ascii=False), encoding="utf-8")
-        await service.harness.renderer.run_worker(work, worker="presentation-worker.mjs")
-        data = (work / PREVIEW_BUNDLE).read_bytes()
-        return data if SYNC_MARKER in data else None
-    except Exception:
-        logging.getLogger(__name__).exception("Sprite preview rebuild failed: %s", version.id)
-        return None
-    finally:
-        shutil.rmtree(work, ignore_errors=True)
-
-
-def _store_bundle(store: Store, sprite: pb.PublishedSprite, data: bytes) -> None:
-    """Replace a publication's player copy and its recorded hash; the source and parameters are untouched."""
-    (store.root / "sprites" / sprite.sprite_id / PREVIEW_BUNDLE).write_bytes(data)
-    sprite.preview_sha256 = hashlib.sha256(data).hexdigest()
-    with store.connection() as db:
-        db.execute(
-            "UPDATE sprites SET data=? WHERE id=?",
-            (json.dumps(MessageToDict(sprite, preserving_proto_field_name=True), ensure_ascii=False), sprite.sprite_id),
-        )
-
-
 async def publish(service, request: pb.PublishSpriteRequest) -> pb.SpriteSummary:
-    """Copy a verified accepted version into an immutable publication; repeating returns the original.
-
-    The player bundle is rebuilt with the current host code when the sealed one predates frame-synchronised
-    previews, so older versions can still be previewed over a template after saving.
-    """
+    """Copy a verified accepted version and its sealed player; repeating returns the original asset."""
     store = service.store
     try:
         version_id = UUID(request.source_version_id)
@@ -256,22 +212,13 @@ async def publish(service, request: pb.PublishSpriteRequest) -> pb.SpriteSummary
                 (str(version.id), request.kind, request.text_prop, request.keywords_prop),
             ).fetchone()
 
-    async def current_bundle() -> bytes:
-        """The sealed bundle, or a fresh build when the sealed one has no synchronisation support."""
-        sealed = (accepted / PREVIEW_BUNDLE).read_bytes()
-        return sealed if SYNC_MARKER in sealed else (await _rebuild_bundle(service, version) or sealed)
-
     if (row := existing()) is not None:
-        sprite = _sprite_from(row)
-        stored = store.root / "sprites" / sprite.sprite_id / PREVIEW_BUNDLE
-        if SYNC_MARKER not in stored.read_bytes() and (fresh := await _rebuild_bundle(service, version)):
-            _store_bundle(store, sprite, fresh)
-        return summarize(sprite)
+        return summarize(_sprite_from(row))
 
     composition = version.spec.composition
     sprite_id = str(uuid4())
     published_at = datetime.now(UTC)
-    bundle = await current_bundle()
+    bundle = (accepted / PREVIEW_BUNDLE).read_bytes()
     directory = store.root / "sprites" / sprite_id
     directory.mkdir(parents=True)
     try:

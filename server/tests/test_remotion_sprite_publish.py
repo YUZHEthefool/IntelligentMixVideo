@@ -47,24 +47,6 @@ DEFAULTS = {"text": "标题", "keywords": "", "color": "#ffffff", "size": 64, "w
 CODE = 'import React from "react";\nexport default function Sprite(p: {text: string}) { return <div>{p.text}</div>; }\n'
 
 
-class BundleRebuilder:
-    """记录重建请求的渲染替身：写出带同步标记的新预览包，或按要求失败；不执行真实浏览器或沙箱。"""
-
-    def __init__(self):
-        """默认成功，requests 保存宿主写给 worker 的请求。"""
-        self.requests: list[dict] = []
-        self.failure: Exception | None = None
-
-    async def run_worker(self, directory, *, worker=None, timeout_seconds=None):
-        """只接受预览包构建；失败时不写任何文件。"""
-        assert worker == "presentation-worker.mjs"
-        self.requests.append(json.loads((directory / "request.json").read_text()))
-        if self.failure:
-            raise self.failure
-        (directory / "interactive.js").write_text("// rebuilt imv-preview-sync")
-        return {}
-
-
 NESTED_SCHEMA = {
     "type": "object",
     "properties": {"title_main": {
@@ -124,10 +106,9 @@ def published_version(tmp_path, schema, defaults):
         "saved", Budget(), store.job_dir(job.id),
     ))
     version = store.publish(job.id, *result)
-    renderer = BundleRebuilder()
-    service = SimpleNamespace(store=store, settings=settings, harness=SimpleNamespace(renderer=renderer))
+    service = SimpleNamespace(store=store, settings=settings)
     app.dependency_overrides[sprite_runtime] = lambda: service
-    yield SimpleNamespace(store=store, version=version, renderer=renderer)
+    yield SimpleNamespace(store=store, version=version)
     app.dependency_overrides.pop(sprite_runtime)
 
 
@@ -189,7 +170,7 @@ def test_published_sprite_survives_deleting_its_source_version(client: TestClien
     assert pb.ListSpritesResponse.FromString(client.get("/api/sprites").content).sprites[0].sprite_id == summary.sprite_id
     preview = client.get(summary.preview_url)
     assert preview.status_code == 200
-    assert "rebuilt imv-preview-sync" in preview.text
+    assert "offline Player fixture" in preview.text
     assert "sandbox allow-scripts" in preview.headers["content-security-policy"]
 
 
@@ -246,40 +227,3 @@ def test_overlay_preview_is_transparent_and_serves_managed_fonts(client: TestCli
     assert font.headers["access-control-allow-origin"] == "*"
     assert client.get(f"/api/sprites/{summary.sprite_id}/fonts/500").status_code == 404
     assert client.get("/api/sprites/00000000-0000-4000-8000-000000000000/fonts/400").status_code == 404
-
-
-def test_stale_player_bundle_is_rebuilt_from_sealed_source(client: TestClient, published) -> None:
-    """封存包缺少同步支持时发布会用封存的源码、默认参数和画布重建；原版本目录不被改动。"""
-    summary = published_sprite(client, published.version.id)
-    request = published.renderer.requests[0]
-    assert request["code"] == published.version.candidate.tsx_code
-    assert request["config"] == published.version.candidate.default_config
-    assert request["composition"]["duration_in_frames"] == 30
-    copied = published.store.root / "sprites" / summary.sprite_id / "interactive.js"
-    assert b"imv-preview-sync" in copied.read_bytes()
-    assert b"offline Player fixture" in (published.store.root / "accepted" / str(published.version.id) / "interactive.js").read_bytes()
-    assert not [item for item in (published.store.root / "sprites").iterdir() if item.name.startswith(".build-")]
-
-
-def test_current_sealed_bundle_is_copied_without_rebuilding(client: TestClient, published) -> None:
-    """封存包已含同步支持时直接复制，不启动任何构建。"""
-    (published.store.root / "accepted" / str(published.version.id) / "interactive.js").write_text("// imv-preview-sync")
-    from server.remotion_templates.evidence import digest
-    published.version.validation.artifacts["interactive.js"] = digest(published.store.root / "accepted" / str(published.version.id) / "interactive.js")
-    with published.store.connection() as db:
-        db.execute("UPDATE versions SET data=? WHERE id=?", (published.version.model_dump_json(), str(published.version.id)))
-    summary = published_sprite(client, published.version.id)
-    assert published.renderer.requests == []
-    assert client.get(summary.preview_url).text.count("imv-preview-sync") == 1
-
-
-def test_rebuild_failure_still_saves_and_republishing_refreshes_the_old_copy(client: TestClient, published) -> None:
-    """重建失败不阻止保存（仅无法叠加预览）；之后重新保存同一资产会把旧副本刷新为新包，其余内容不变。"""
-    published.renderer.failure = RuntimeError("sandbox unavailable")
-    first = published_sprite(client, published.version.id)
-    assert "offline Player fixture" in client.get(first.preview_url).text
-    published.renderer.failure = None
-    again = published_sprite(client, published.version.id)
-    assert again.sprite_id == first.sprite_id
-    assert "rebuilt imv-preview-sync" in client.get(first.preview_url).text
-    assert len(pb.ListSpritesResponse.FromString(client.get("/api/sprites").content).sprites) == 1

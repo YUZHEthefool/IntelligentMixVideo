@@ -20,7 +20,6 @@ from .segmentation.router import router as segmentation_router
 from .settings_plugins import router as settings_router
 from .sub_api.router import router
 from .template.router import router as template_router
-from .projects.router import router as project_router
 from .remotion_templates.api import app as remotion_templates_app
 from .remotion_templates.sprite_router import router as sprite_router
 from .video_composition.router import router as composition_router
@@ -64,7 +63,6 @@ app.include_router(template_router)
 app.include_router(segmentation_router)
 app.include_router(settings_router)
 app.include_router(sprite_router)
-app.include_router(project_router)
 app.mount("/api/templates", remotion_templates_app)
 app.include_router(composition_router)
 

@@ -1,8 +1,7 @@
-/** Sprite 资产 HTTP 边界：资产发布与目录使用 Protobuf；写入失败不自动重试。 */
+/** Sprite 资产 HTTP 边界：资产发布使用 Protobuf；写入失败不自动重试。 */
 import { create, fromBinary, toBinary } from "@bufbuild/protobuf";
 import { apiBase } from "@/lib/api-base";
 import {
-  ListSpritesResponseSchema,
   PublishSpriteRequestSchema,
   PublishSpriteResponseSchema,
   type SpriteKind,
@@ -57,11 +56,6 @@ function toAsset(summary: SpriteSummary): SpriteAsset {
     seconds: summary.canvas && summary.canvas.fps ? summary.canvas.previewFrames / summary.canvas.fps : 0,
     aspect: summary.canvas && summary.canvas.height ? summary.canvas.width / summary.canvas.height : 9 / 16,
   };
-}
-
-/** 读取独立 Remotion 资产目录。 */
-export async function listSprites(signal?: AbortSignal): Promise<SpriteAsset[]> {
-  return fromBinary(ListSpritesResponseSchema, await request("/api/sprites", "GET", signal)).sprites.map(toAsset);
 }
 
 /** 把成功版本保存为资产；相同选择重复调用返回原资产。 */

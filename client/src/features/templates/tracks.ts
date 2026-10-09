@@ -1,5 +1,4 @@
 /** 对象时间规则、实例编辑与视频应用计算；计算结果不修改模板配置。 */
-import { frameRange } from "@/features/timeline/frames";
 import { defaultEditor, type Draft, type EffectDraft, type Editor, type EffectAsset, type EffectTrack, type MasterVideo } from "./model";
 import { appliedTargets, applyAsset, effectTargets, isTextTarget, targetEffectKeys, type EffectTarget } from "./effects";
 
@@ -28,9 +27,8 @@ export function resolveTrack(track: EffectTrack, duration: number, fps = 30): Re
     throw new Error("视频时长或帧率无效");
   const start = track.start_mode === "percent" ? duration * track.start / 100 : track.start;
   const end = track.duration === null ? duration : start + track.duration;
-  const range = frameRange(start, end, duration, fps);
-  const first = range.first;
-  const last = track.target === "transition" ? Math.min(Math.floor(duration * fps + 1e-8), first + Math.round(track.duration! * fps)) : range.last;
+  const first = Math.round(start * fps);
+  const last = Math.min(Math.floor(duration * fps + 1e-8), track.target === "transition" ? first + Math.round(track.duration! * fps) : Math.round(end * fps));
   const editor = { ...track.editor };
   if (track.target === "transition" && (first <= 0 || last >= Math.floor(duration * fps + 1e-8) || end > duration))
     throw new Error("转场须位于两个非空视频片段之间");
