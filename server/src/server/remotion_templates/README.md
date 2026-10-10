@@ -120,12 +120,30 @@ source and field choice returns the original Sprite. `animation_frames` and `sta
 because composition versions carry no such evidence, and `preview_url` serves the sealed
 interactive player page rather than an MP4.
 
-`GET /api/sprites` lists asset summaries without TSX. `GET /api/sprites/{id}/preview`
-serves the asset's own sealed interactive player copy, with managed fonts under the same asset URL.
-The optional `overlay=true` query removes the inspection checkerboard; the document stays sandboxed.
-Publishing does not rebuild the bundle or depend on a project/IMS template record. The source chat
-can be deleted without deleting its published assets. This feature does not implement project
-editing, timeline synchronization, template bindings or final video composition.
+`GET /api/sprites` lists independent asset summaries (no TSX). The shared video project layer
+combines IMS effects and Remotion clips on one source canvas and timeline. Its JSON endpoints are:
+
+- `GET /api/projects`: list project snapshots.
+- `GET /api/projects/{project_id}`: read one complete revision.
+- `PUT /api/projects/{project_id}`: atomically save `name`, `description`, `media`, IMS `tracks`,
+  Remotion `clips: [{id, sprite_id, start}]`, and `expected_revision`.
+- `DELETE /api/projects/{project_id}?expected_revision=N`: delete that revision only.
+
+The client creates a stable UUID with the draft. Revision 0 creates a record; stale writes/deletes
+return 409. Media uses the existing IMS `url/width/height/duration` contract. The canvas, source
+clips, transition-adjusted duration and frame boundaries are shared; Remotion does not introduce
+its own canvas or timeline. Asset durations are derived server-side, not accepted as overrides.
+All project data lives in one SQLite `composition_projects` record in the service data directory.
+A Remotion-only project needs no IMS effect or IMS template ID. The old IMS template library is
+separate and is neither migrated nor modified. `/api/sprites/styles/*` is no longer implemented;
+experimental bindings from earlier iterations are not automatically migrated or deleted.
+
+The editor reuses the IMS canvas/timeline components and pushes the common preview time to
+`GET /api/sprites/{id}/preview?overlay=true&sync=1` iframes. Each clip has a stable message channel;
+adding/removing clips keeps existing players synchronized. Old preview bundles are rebuilt in
+the isolated worker when required; rebuild failures retain the asset but disable synced preview.
+Deleting a project or source chat preserves published assets. Projects currently support editing
+and preview only; final composition and `/api/sprites/render` are not implemented.
 
 ## Code diagnostics
 

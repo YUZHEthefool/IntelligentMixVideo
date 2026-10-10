@@ -42,7 +42,7 @@ test("版本卡片一键把成功版本保存为 Sprite 资产", async () => {
   version.spec.sprite_kind = "composition";
   render(<VersionCard version={version} selected={false} latest disabled={false} previewDisabled={false} onPreview={() => {}} />);
   fireEvent.click(screen.getByRole("button", { name: "保存到资产" }));
-  await screen.findByText("已保存到资产「霓虹标题」。");
+  await screen.findByText("已保存到资产「霓虹标题」，可在「视频项目」的 Remotion 资产库中使用。");
   expect(screen.queryByRole("dialog")).toBeNull();
   expect(request).toMatchObject({ sourceVersionId: "version-2", kind: SpriteKind.VIDEO_OVERLAY, textProp: "", keywordsProp: "" });
 });
