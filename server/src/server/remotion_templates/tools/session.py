@@ -9,6 +9,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from uuid import uuid4
 from .contracts import (
+    CodeDiagnostic,
     CodeValidationReport,
     ComponentDefinition,
     PresetCreateInput,
@@ -193,11 +194,15 @@ class ToolSession:
             raise ToolFault("VALIDATION_UNAVAILABLE", "The isolated TypeScript validator is unavailable.")
         return await self.validator.validate_code(component)
 
-    async def validate_render(self, request: RenderValidationInput) -> RenderValidationReport:
-        """Run the isolated component behavior runner and cache the exact report."""
+    async def validate_render(self, request: RenderValidationInput, *, transparency: bool = False) -> RenderValidationReport:
+        """Run the isolated component behavior runner and cache the exact report.
+
+        ``transparency`` adds the canvas-coverage measurement. The option is only forwarded when asked for,
+        so a validator that predates it keeps working.
+        """
         if self.validator is None:
             raise ToolFault("VALIDATION_UNAVAILABLE", "The isolated behavior validator is unavailable.")
-        report = await self.validator.validate_render(request)
+        report = await self.validator.validate_render(request, **({"transparency": True} if transparency else {}))
         parameters = merge_parameters(request.component.default_parameters, request.parameters)
         try:
             validate_parameters(request.component.parameter_schema, parameters)
@@ -320,6 +325,7 @@ class ToolSession:
         )
         if not validation.passed:
             raise ToolFault("CODE_VALIDATION_FAILED", "Sprite code validation failed.", details={"validation": validation.model_dump(mode="json")})
+        await self._require_visible_video(sprite)
         record = SpriteRecord(
             sprite_id=uuid4().hex,
             created_at=datetime.now(UTC).isoformat(),
@@ -330,6 +336,37 @@ class ToolSession:
         self.latest_sprite_id = record.sprite_id
         self._last_component_sprite = record
         return SpriteCreateOutput(sprite=record, validation=validation)
+
+    async def _require_visible_video(self, sprite: SpriteDraft) -> None:
+        """Refuse a Sprite that hides the video in every sampled frame while the Executor can still fix it.
+
+        Sprites are composited over the user's own video, so a full-frame opaque layer is never what a filter
+        or an effect wants. This is the browser mount the host needs anyway: the report is cached under the key
+        the final host check reads, so completing the task does not mount the Sprite a second time.
+        """
+        report = await self.validate_render(
+            RenderValidationInput(
+                component=ComponentDefinition(
+                    code=sprite.code,
+                    parameter_schema=sprite.parameter_schema,
+                    default_parameters=sprite.default_parameters,
+                ),
+                duration_frames=sprite.composition.duration_frames,
+            ),
+            transparency=True,
+        )
+        if report.passed:
+            return
+        diagnostics = [
+            CodeDiagnostic(source="contract", severity="error", message=f"{item.name}: {item.message}" if item.message else item.name)
+            for item in report.checks
+            if item.status != "passed"
+        ] or [CodeDiagnostic(source="contract", severity="error", message="Sprite render validation failed.")]
+        raise ToolFault(
+            "CODE_VALIDATION_FAILED",
+            "Sprite render validation failed.",
+            details={"validation": CodeValidationReport(passed=False, diagnostics=diagnostics).model_dump(mode="json")},
+        )
 
     async def compose_sprite(self, request):
         """Resolve immutable Presets and generate deterministic local-frame Sprite code."""
