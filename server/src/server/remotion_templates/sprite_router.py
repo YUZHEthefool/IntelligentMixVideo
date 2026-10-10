@@ -1,4 +1,4 @@
-"""Remotion asset publication, catalog and sandboxed preview routes."""
+"""Remotion asset publication, catalog and sandboxed preview routes; project saves live in projects.router."""
 
 from typing import Annotated
 
@@ -45,7 +45,7 @@ async def _body(request: Request, message: Message) -> None:
 
 @router.get("", response_class=Response, responses={200: {"content": PROTOBUF_CONTENT}}, summary="查询已发布的 Sprite 目录")
 async def list_sprites(service: Service) -> Response:
-    """返回不可变发布资产目录，不包含 TSX 源码。"""
+    """返回可供项目添加的不可变发布条目，不包含 TSX 源码。"""
     items = await run_in_threadpool(sprites.catalog, service.store)
     return _response(pb.ListSpritesResponse(sprites=items))
 
@@ -66,7 +66,8 @@ async def publish_sprite(request: Request, service: Service) -> Response:
 async def sprite_preview(sprite_id: str, service: Service, overlay: bool = False) -> HTMLResponse:
     """返回发布时复制的隔离播放器页面，不依赖源聊天仍然存在。
 
-    `overlay=true` 使用透明背景，普通预览保留检查棋盘格。
+    `overlay=true` 使用透明背景，供项目编辑把资产叠在共用预览画面上；再加页面参数 `sync=1`
+    （新生成的资产支持）即由父页面通过消息逐帧驱动，无控制条和循环。
     """
     script = await run_in_threadpool(sprites.preview_script, service.store, sprite_id)
     return player_page(script, overlay=overlay)

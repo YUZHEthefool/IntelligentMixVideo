@@ -126,7 +126,7 @@ export function VersionCard({
     setPublishError("");
     try {
       const asset = await publishSprite(version.id, publishChoice(version));
-      if (!scope.current.signal.aborted) setNotice(`已保存到资产「${asset.name}」。`);
+      if (!scope.current.signal.aborted) setNotice(`已保存到资产「${asset.name}」，可在「视频项目」的 Remotion 资产库中使用。`);
     } catch (reason) {
       if (!scope.current.signal.aborted) setPublishError(reason instanceof Error ? reason.message : "保存到资产失败，请重试");
     } finally {

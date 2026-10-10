@@ -85,6 +85,9 @@ class Store:
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     job_id TEXT NOT NULL REFERENCES jobs(id), data TEXT NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS composition_projects (
+                    id TEXT PRIMARY KEY, revision INTEGER NOT NULL, updated_at TEXT NOT NULL, data TEXT NOT NULL
+                );
                 CREATE TABLE IF NOT EXISTS sprites (
                     id TEXT PRIMARY KEY, source_version_id TEXT NOT NULL,
                     kind INTEGER NOT NULL, text_prop TEXT NOT NULL, keywords_prop TEXT NOT NULL,

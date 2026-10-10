@@ -110,3 +110,6 @@
 .template-workspace .template-timeline-mark { color: var(--primary); background: color-mix(in oklch, var(--primary) 14%, transparent); }
 .template-workspace .template-preview-transition { color: var(--muted-foreground); }
 .template-workspace .template-preview-transition:hover { color: var(--foreground); background: var(--accent); }
+
+/* 项目时间轴的 Remotion 片段沿用已有轨道样式与主题令牌。 */
+.template-workspace [data-object="remotion"] { --object-ink: var(--foreground); --object-fill: var(--muted); }
