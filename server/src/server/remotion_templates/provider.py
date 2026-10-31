@@ -33,12 +33,22 @@ def model_image(path: Path) -> bytes:
         return buffer.getvalue()
 
 
-def _image_content(paths: list[Path], *, label: str) -> list[dict]:
-    """Encode ephemeral model images in order, enforcing the shared 24 MiB raw-image limit."""
+# The long side of a low-detail image: enough to tell what a reference shows, for a layer that only routes the request.
+LOW_DETAIL_SIDE = 512
+
+
+def _image_content(paths: list[Path], *, label: str, detail: str = "high") -> list[dict]:
+    """Encode ephemeral model images in order, enforcing the shared 24 MiB raw-image limit; ``detail`` "low" also shrinks them."""
     content = []
     size = 0
     for path in paths:
         data = model_image(path)
+        if detail == "low":
+            with Image.open(BytesIO(data)) as image:
+                image.thumbnail((LOW_DETAIL_SIDE, LOW_DETAIL_SIDE))
+                buffer = BytesIO()
+                image.save(buffer, format="PNG")
+                data = buffer.getvalue()
         size += len(data)
         if size > 24 * 1024 * 1024:
             raise ModelFailure(f"{label} images exceed the bounded model request size.")
@@ -47,11 +57,22 @@ def _image_content(paths: list[Path], *, label: str) -> list[dict]:
                 "type": "image_url",
                 "image_url": {
                     "url": "data:image/png;base64," + base64.b64encode(data).decode(),
-                    "detail": "high",
+                    "detail": detail,
                 },
             }
         )
     return content
+
+
+def expand_image_paths(messages: list[dict], detail: str) -> None:
+    """Encode the images a window holds by path (`context.image_message`) in place, just before the request is sent."""
+    for message in messages:
+        content = message.get("content")
+        if isinstance(content, list) and any(item.get("type") == "image_path" for item in content):
+            message["content"] = [
+                part for item in content
+                for part in (_image_content([Path(item["path"])], label="Window", detail=detail) if item.get("type") == "image_path" else [item])
+            ]
 
 
 class ModelFailure(RuntimeError):
@@ -121,6 +142,10 @@ class Budget:
     on_progress: Callable[[str], None] | None = None
     on_round: Callable[[dict], None] | None = None
     active_phase: str | None = None
+    # The public reply of a finished free-form task (summary, choices, suggestions), which the runtime shows the user.
+    reply: dict | None = None
+    # Input tokens the provider served from its prefix cache in this run, when it reports them.
+    cached_tokens: int = 0
     _start: tuple[int, int] = (0, 0)
 
     def progress(self, phase: str) -> None:
@@ -149,6 +174,8 @@ class Budget:
     def summary(self) -> dict[str, int]:
         """Expose flat integer counters compatible with the stored job usage contract."""
         result = {"calls": self.calls, "tokens": self.tokens}
+        if self.cached_tokens:
+            result["cached_tokens"] = self.cached_tokens
         for name, usage in self.phases.items():
             result.update({f"{name}_{key}": value for key, value in usage.items()})
         for name in ("outer", "plan", "executor"):
@@ -271,17 +298,26 @@ class Provider:
         budget: Budget,
         *,
         images: list[Path] | None = None,
+        detail: str = "high",
+        data: str | None = None,
     ) -> AssistantMessage:
-        """Request real function calls with bounded recent conversation; never accept model tool results."""
+        """Request real function calls with bounded recent conversation; never accept model tool results.
+
+        ``data`` (the host's current snapshot) is sent as the last user message instead of inside ``system``, so the
+        system prompt stays the same across turns; ``detail`` is the image detail this layer needs.
+        """
         body = {
             "messages": [{"role": "system", "content": system}, *context.messages()],
             "tools": tools,
             "tool_choice": "auto",
         }
+        if data is not None:
+            body["messages"].append({"role": "user", "content": data})
         if len(json.dumps(body, ensure_ascii=False).encode()) > 512_000:
             raise ModelFailure(
                 "Model task snapshot and window exceed the context budget."
             )
+        expand_image_paths(body["messages"], detail)
         if images:
             content = [
                 {
@@ -289,7 +325,7 @@ class Provider:
                     "text": "The leading images are the user's reference images, one-to-one and in order with user_intent.reference_images; each entry's source and meaning say whether it came with the original request, with the current instruction, or as the answer to a numbered clarification. Any images after them are current candidate frames: observations, not new user requirements. Interpret only the requested Sprite appearance, not application chrome or scenery.",
                 }
             ]
-            content.extend(_image_content(images, label="Reference"))
+            content.extend(_image_content(images, label="Reference", detail=detail))
             body["messages"].append({"role": "user", "content": content})
         # Trim whole old exchanges only in this request, preserving the latest exchange and image mapping.
         groups = context.groups
@@ -489,11 +525,18 @@ class Provider:
                 value = token_detail.get(name)
                 return value if type(value) is int and value >= 0 else None
 
+            # DeepSeek reports prompt_cache_hit_tokens; OpenAI-compatible services prompt_tokens_details.cached_tokens.
+            details = token_detail.get("prompt_tokens_details")
+            nested = details.get("cached_tokens") if isinstance(details, dict) else None
+            cached = valid_usage("prompt_cache_hit_tokens")
+            cached = cached if cached is not None else nested if type(nested) is int and nested >= 0 else None
+            budget.cached_tokens += cached or 0
             budget.record(
                 "model_usage",
                 phase=budget.active_phase,
                 total_tokens=usage,
                 input_tokens=valid_usage("prompt_tokens"),
+                cached_input_tokens=cached,
                 output_tokens=valid_usage("completion_tokens"),
                 estimated_input_tokens=estimated,
                 image_count=image_count,

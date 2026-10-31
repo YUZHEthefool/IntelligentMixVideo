@@ -307,6 +307,29 @@ def test_usage_breakdown_and_output_reservation(tmp_path):
     )
 
 
+@pytest.mark.parametrize(("usage", "cached"), [
+    ({"prompt_cache_hit_tokens": 700}, 700),
+    ({"prompt_tokens_details": {"cached_tokens": 650}}, 650),
+    ({}, None),
+])
+def test_cache_hits_are_recorded_from_either_provider_shape(tmp_path, usage, cached):
+    """DeepSeek 的 prompt_cache_hit_tokens 与 OpenAI 兼容服务的 prompt_tokens_details.cached_tokens 都记入私有审计与任务用量；服务没有报告时记为 null，不算零命中。"""
+
+    def respond(_request):
+        """One completion with the provider's usage shape."""
+        return httpx.Response(200, json={
+            "usage": {"total_tokens": 900, "prompt_tokens": 800, "completion_tokens": 100, **usage},
+            "choices": [{"finish_reason": "stop", "message": {"role": "assistant", "content": '{"answer":"完成"}'}}],
+        })
+
+    settings = Settings(_env_file=None, actor_model="offline", actor_api_key=SecretStr("fixture"))
+    budget = Budget(audit_path=tmp_path / "audit.jsonl")
+    asyncio.run(Provider(settings, transport=httpx.MockTransport(respond)).ask(DialogueOutput, "s", "u", budget))
+    events = [json.loads(line) for line in budget.audit_path.read_text().splitlines()]
+    assert next(e for e in events if e["event"] == "model_usage")["cached_input_tokens"] == cached
+    assert budget.summary().get("cached_tokens") == cached
+
+
 @pytest.mark.parametrize("enforced", [False, True])
 def test_actor_budget_trims_whole_exchanges_without_mutating_history(
     tmp_path, enforced
